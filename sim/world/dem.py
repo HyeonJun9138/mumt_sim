@@ -16,16 +16,19 @@ class DEM:
         self._bounds = self.dataset.bounds
         self.xmin, self.ymin, self.xmax, self.ymax = self._bounds
 
-        # Local ENU world in meters centered on the DEM footprint
-        self.env_xmin, self.env_xmax = -WORLD_HALF, WORLD_HALF
-        self.env_ymin, self.env_ymax = -WORLD_HALF, WORLD_HALF
-
-        # Approximate meters-per-degree factors (sufficient for local scene)
+        # Local ENU world in meters centered on the DEM footprint (1:1 scale)
         self.lon0 = 0.5 * (self.xmin + self.xmax)
         self.lat0 = 0.5 * (self.ymin + self.ymax)
         self.m_per_deg_lat = 111320.0
         self.m_per_deg_lon = math.cos(math.radians(self.lat0)) * 111320.0
-        self.env_bounds = self._compute_env_bounds()
+        self.width_m = (self.xmax - self.xmin) * self.m_per_deg_lon
+        self.height_m = (self.ymax - self.ymin) * self.m_per_deg_lat
+        self.env_xmin, self.env_xmax = -0.5 * self.width_m, 0.5 * self.width_m
+        self.env_ymin, self.env_ymax = -0.5 * self.height_m, 0.5 * self.height_m
+        # 1:1 scaling (meters <-> env units)
+        self.scale_x = self.m_per_deg_lon
+        self.scale_y = self.m_per_deg_lat
+        self.env_bounds = (self.env_xmin, self.env_xmax, self.env_ymin, self.env_ymax)
 
     def env_to_dataset_xy(self, x_env, y_env):
         lon, lat = self.env_to_lonlat(x_env, y_env)
@@ -35,24 +38,14 @@ class DEM:
         return row, col
 
     def env_to_lonlat(self, x_env: float, y_env: float):
-        lon = self.lon0 + x_env / self.m_per_deg_lon
-        lat = self.lat0 + y_env / self.m_per_deg_lat
+        lon = self.lon0 + x_env / self.scale_x
+        lat = self.lat0 + y_env / self.scale_y
         return lon, lat
 
     def lonlat_to_env(self, lon: float, lat: float):
-        x_env = (lon - self.lon0) * self.m_per_deg_lon
-        y_env = (lat - self.lat0) * self.m_per_deg_lat
+        x_env = (lon - self.lon0) * self.scale_x
+        y_env = (lat - self.lat0) * self.scale_y
         return x_env, y_env
-
-    def _compute_env_bounds(self):
-        corners = [
-            (self.xmin, self.ymin),
-            (self.xmin, self.ymax),
-            (self.xmax, self.ymin),
-            (self.xmax, self.ymax),
-        ]
-        xs, ys = zip(*(self.lonlat_to_env(lon, lat) for lon, lat in corners))
-        return (min(xs), max(xs), min(ys), max(ys))
 
     def get_env_bounds(self):
         return self.env_bounds

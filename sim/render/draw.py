@@ -171,6 +171,7 @@ def draw_dem(
     elev = dem.elevation
     rows, cols = elev.shape
     global _dem_step_smoothed
+    # Moderate sampling density (closer to original)
     desired_step = clamp(1 + cam.distance / 600.0, 1, 8)
     _dem_step_smoothed = 0.9 * _dem_step_smoothed + 0.1 * desired_step  # smoother transitions
     step = max(2, int(round(_dem_step_smoothed)))  # avoid overly dense sampling when zoomed in

@@ -1,0 +1,16 @@
+{
+  "pathID": 999999001,
+  "aircraftID": 1,
+  "lahWaypointList": [
+    {
+      "waypointID": 1,
+      "coordinate": { "latitude": 37.72171, "longitude": 128.10747, "altitude": 300.0 },
+      "speed": 60
+    },
+    {
+      "waypointID": 2,
+      "coordinate": { "latitude": 37.78118, "longitude": 128.14006, "altitude": 300.0 },
+      "speed": 60
+    }
+  ]
+}

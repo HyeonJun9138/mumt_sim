@@ -197,6 +197,8 @@ def main():
                     fog_enabled = not fog_enabled
                 elif e.key == pygame.K_n:
                     targets_move = not targets_move
+                elif e.key == pygame.K_p:
+                    print("[auto] Autopilot not available (manual only)")
                 elif e.key == pygame.K_g:
                     cx, cy, cz = cam.target
                     ox = random.uniform(-150, 150)
