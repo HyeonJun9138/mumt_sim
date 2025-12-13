@@ -35,6 +35,7 @@ from OpenGL.GL import (
     glFogi,
     glHint,
     glLineWidth,
+    glLineStipple,
     glLoadIdentity,
     glMatrixMode,
     GL_MODELVIEW,
@@ -53,6 +54,8 @@ from OpenGL.GL import (
     GL_FOG_MODE,
     GL_LINE_LOOP,
     GL_LINES,
+    GL_LINE_STRIP,
+    GL_LINE_STIPPLE,
     GL_NICEST,
     GL_SRC_ALPHA,
     GL_ONE_MINUS_SRC_ALPHA,
@@ -66,8 +69,8 @@ from OpenGL.GL import (
 )
 from OpenGL.GLU import gluPerspective
 
-from camera import OrbitCamera
-from config import (
+from sim.core.camera import OrbitCamera
+from sim.config import (
     CLEAR_COLOR,
     DEFAULT_FOV_DIAG,
     DEM_FILE,
@@ -78,12 +81,14 @@ from config import (
     WIN_H,
     WORLD_HALF,
     RENDER_RADIUS_M,
+    DEM_PREFETCH_RADIUS_M,
+    DEM_CACHE_MOVE_THRESHOLD_M,
     clamp,
 )
-from dem import DEM, check_los
-from draw import draw_axes, draw_camera_footprint, draw_dem, draw_grid, draw_hud, draw_uav
-from entities import MovingTarget, Missile
-from uav import UAV, UAVParams
+from sim.world.dem import DEM, check_los
+from sim.render.draw import draw_axes, draw_camera_footprint, draw_dem, draw_grid, draw_hud, draw_uav
+from sim.entities.entities import MovingTarget, Missile
+from sim.core.uav import UAV, UAVParams
 
 
 def main():
@@ -129,6 +134,8 @@ def main():
     targets = [MovingTarget(x=300.0, y=0.0)]
     targets_move = True
     missiles = []
+    trail = []
+    crashed = False
 
     orbit = False
     pan = False
@@ -184,6 +191,8 @@ def main():
                     running = False
                 elif e.key == pygame.K_r:
                     uav.reset()
+                    crashed = False
+                    trail.clear()
                 elif e.key == pygame.K_f:
                     fog_enabled = not fog_enabled
                 elif e.key == pygame.K_n:
@@ -245,7 +254,38 @@ def main():
         cam.target[1] = (1 - lerp) * cam.target[1] + lerp * uav.s.y
         cam.target[2] = (1 - lerp) * cam.target[2] + lerp * uav.s.z
 
-        uav.step(dt)
+        if not crashed:
+            uav.step(dt)
+            ground_z = dem.get_height(uav.s.x, uav.s.y)
+            if uav.s.z <= ground_z + 0.5:
+                crashed = True
+                uav.s.z = ground_z
+                uav.s.u = 0.0
+                uav.cmd_throttle = 0.0
+                uav.cmd_pitch_rate = 0.0
+                uav.cmd_yaw_rate = 0.0
+                uav.cmd_roll_rate = 0.0
+        # Track trail with spacing and 1 km length limit
+        pos = (uav.s.x, uav.s.y, uav.s.z)
+        if trail:
+            prev = trail[-1]
+            seg = math.dist(pos, prev)
+            if seg >= 5.0:
+                trail.append(pos)
+        else:
+            trail.append(pos)
+        # keep last 1 km of path
+        total = 0.0
+        cutoff_idx = 0
+        for i in range(len(trail) - 1, 0, -1):
+            total += math.dist(trail[i], trail[i - 1])
+            if total > 1000.0:
+                cutoff_idx = i - 1
+                break
+        if cutoff_idx > 0:
+            trail = trail[cutoff_idx:]
+        elif total <= 0.0 and len(trail) > 2:
+            trail = trail[-2:]
         if targets_move:
             for t in targets:
                 t.step(dt, dem=dem)
@@ -273,8 +313,28 @@ def main():
         glDisable(GL_BLEND)
         draw_grid(size=int(RENDER_RADIUS_M), step=100)
         draw_axes(50)
-        draw_dem(dem, cam, center_xy=(uav.s.x, uav.s.y), radius_m=RENDER_RADIUS_M, z_scale=0.5)
+        draw_dem(
+            dem,
+            cam,
+            center_xy=(uav.s.x, uav.s.y),
+            radius_m=RENDER_RADIUS_M,
+            prefetch_radius_m=DEM_PREFETCH_RADIUS_M,
+            move_threshold=DEM_CACHE_MOVE_THRESHOLD_M,
+            z_scale=1.0,
+        )
         glEnable(GL_BLEND)
+
+        # UAV trail (blue dashed line)
+        if len(trail) >= 2:
+            glEnable(GL_LINE_STIPPLE)
+            glLineStipple(1, 0x0F0F)
+            glLineWidth(2.0)
+            glColor3f(0.2, 0.6, 1.0)
+            glBegin(GL_LINE_STRIP)
+            for p in trail:
+                glVertex3f(*p)
+            glEnd()
+            glDisable(GL_LINE_STIPPLE)
 
         draw_uav(uav)
         for t in targets:
@@ -287,13 +347,21 @@ def main():
             tgt_pos = np.array([nearest.x, nearest.y, nearest.z], dtype=float)
             los_clear = check_los(uav_pos, tgt_pos, dem)
             glLineWidth(2.0)
+            glEnable(GL_LINE_STIPPLE)
+            glLineStipple(1, 0x0C0C)
             glColor3f(1, 1, 1) if los_clear else glColor3f(1, 0, 0)
             glBegin(GL_LINES)
             glVertex3f(*uav_pos)
             glVertex3f(*tgt_pos)
             glEnd()
+            glDisable(GL_LINE_STIPPLE)
             footprint_area = draw_camera_footprint(
-                uav, (nearest.x, nearest.y, nearest.z), fov_diag_deg=fov_diag, dem=dem, aspect_ratio=16 / 9
+                uav,
+                (nearest.x, nearest.y, nearest.z),
+                fov_diag_deg=fov_diag,
+                dem=dem,
+                aspect_ratio=16 / 9,
+                z_scale=1.0,
             )
         else:
             footprint_area = None
@@ -309,6 +377,8 @@ def main():
         ]
         if footprint_area is not None:
             lines.append(f"Footprint area: {footprint_area:8.1f} m^2")
+        if crashed:
+            lines.append("Status: CRASHED (press R to reset)")
         draw_hud(lines)
 
         if debug_frames < 3:
