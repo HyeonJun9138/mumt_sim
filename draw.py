@@ -52,6 +52,12 @@ from OpenGL.GL import (
     GL_TRIANGLES,
     GL_UNPACK_ALIGNMENT,
     GL_UNSIGNED_BYTE,
+    glGetError,
+    glGetString,
+    GL_VENDOR,
+    GL_RENDERER,
+    GL_VERSION,
+    GL_SHADING_LANGUAGE_VERSION,
 )
 from OpenGL.GLU import gluPerspective
 
@@ -63,6 +69,8 @@ from uav import UAV
 _hud_font = None
 _hud_tex_id = None
 _hud_size = (0, 0)
+_dem_debug_logged = False
+_gl_info_logged = False
 
 
 def draw_axes(length=50.0, width=2.0):
@@ -147,34 +155,60 @@ def draw_uav(uav: UAV):
     glPopMatrix()
 
 
-def draw_dem(dem: DEM, cam: OrbitCamera, z_scale=0.5):
+def draw_dem(dem: DEM, cam: OrbitCamera, center_xy=(0.0, 0.0), radius_m=2000.0, z_scale=0.5):
     elev = dem.elevation
     rows, cols = elev.shape
-    transform = dem.transform
-    xmin, ymin, xmax, ymax = dem._bounds
-    env_xmin, env_xmax = dem.env_xmin, dem.env_xmax
-    env_ymin, env_ymax = dem.env_ymin, dem.env_ymax
-    scale_x = (env_xmax - env_xmin) / (xmax - xmin)
-    scale_y = (env_ymax - env_ymin) / (ymax - ymin)
     step = int(clamp(1 + cam.distance / 600.0, 1, 8))
     glColor3f(0.28, 0.53, 0.28)
     glLineWidth(1.0)
-    for r in range(0, rows - 1, step):
+
+    cx, cy = center_xy
+    r = max(100.0, radius_m)
+    corners = [
+        (cx - r, cy - r),
+        (cx - r, cy + r),
+        (cx + r, cy - r),
+        (cx + r, cy + r),
+    ]
+    idxs = [dem.env_to_dataset_xy(x, y) for x, y in corners]
+    row_min = clamp(min(i[0] for i in idxs), 0, rows - 1)
+    row_max = clamp(max(i[0] for i in idxs), 0, rows - 1)
+    col_min = clamp(min(i[1] for i in idxs), 0, cols - 1)
+    col_max = clamp(max(i[1] for i in idxs), 0, cols - 1)
+
+    # Fallback to full render if the cropped window collapses (should be rare)
+    if (row_max - row_min) < 2 or (col_max - col_min) < 2:
+        row_min, row_max = 0, rows - 1
+        col_min, col_max = 0, cols - 1
+
+    row_min, row_max = int(row_min), int(row_max)
+    col_min, col_max = int(col_min), int(col_max)
+
+    global _dem_debug_logged
+    if not _dem_debug_logged:
+        print(
+            f"[draw_dem] rows {row_min}-{row_max} cols {col_min}-{col_max} step {step} elev {dem.min_elev:.1f}/{dem.max_elev:.1f}"
+        )
+        _dem_debug_logged = True
+
+    err = glGetError()
+    if err:
+        print(f"[GL ERROR] during draw_dem: {err}")
+
+    for r_idx in range(row_min, row_max, step):
         glBegin(GL_LINE_STRIP)
-        for c in range(0, cols - 1, step):
-            x, y = transform * (c, r)
-            x_env = env_xmin + (x - xmin) * scale_x
-            y_env = env_ymin + (y - ymin) * scale_y
-            z_env = elev[r, c] * z_scale
+        for c_idx in range(col_min, col_max, step):
+            lon, lat = dem.transform * (c_idx, r_idx)
+            x_env, y_env = dem.lonlat_to_env(lon, lat)
+            z_env = elev[r_idx, c_idx] * z_scale
             glVertex3f(x_env, y_env, z_env)
         glEnd()
-    for c in range(0, cols - 1, step * 2):
+    for c_idx in range(col_min, col_max, step * 2):
         glBegin(GL_LINE_STRIP)
-        for r in range(0, rows - 1, step):
-            x, y = transform * (c, r)
-            x_env = env_xmin + (x - xmin) * scale_x
-            y_env = env_ymin + (y - ymin) * scale_y
-            z_env = elev[r, c] * z_scale
+        for r_idx in range(row_min, row_max, step):
+            lon, lat = dem.transform * (c_idx, r_idx)
+            x_env, y_env = dem.lonlat_to_env(lon, lat)
+            z_env = elev[r_idx, c_idx] * z_scale
             glVertex3f(x_env, y_env, z_env)
         glEnd()
 
@@ -307,6 +341,7 @@ def draw_hud(lines: List[str]):
 
     glBindTexture(GL_TEXTURE_2D, 0)
     glDisable(GL_TEXTURE_2D)
+    glDisable(GL_BLEND)
     glEnable(GL_DEPTH_TEST)
     glPopMatrix()
     glMatrixMode(GL_PROJECTION)

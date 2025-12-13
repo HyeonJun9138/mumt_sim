@@ -4,10 +4,20 @@ from pathlib import Path
 WIN_W, WIN_H = 1280, 800
 FPS = 60
 WORLD_HALF = 2500.0
+RENDER_RADIUS_M = 2000.0  # draw/update region radius around UAV
 
 # Paths
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEM_FILE = REPO_ROOT / "YEOJU.img"
+REPO_ROOT = Path(__file__).resolve().parent
+MAP_DIR = REPO_ROOT / "resources" / "map"
+DEFAULT_DEM_NAME = "n37_e127_1arc_v3.tif"
+DEM_FILE = MAP_DIR / DEFAULT_DEM_NAME
+
+if not DEM_FILE.exists():
+    tif_files = sorted(MAP_DIR.glob("*.tif"))
+    if tif_files:
+        DEM_FILE = tif_files[0]
+    else:
+        raise FileNotFoundError(f"No DEM .tif found in {MAP_DIR}")
 
 # Rendering defaults
 DEFAULT_FOV_DIAG = 10.0

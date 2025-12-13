@@ -1,0 +1,109 @@
+                elif e.button == 5:
+                    cam.distance = min(8000.0, cam.distance * 1.1)
+            elif e.type == pygame.MOUSEBUTTONUP:
+                if e.button == 3:
+                    orbit = False
+                elif e.button == 2:
+                    pan = False
+            elif e.type == pygame.MOUSEMOTION:
+                if orbit:
+                    dx = e.pos[0] - last[0]
+                    dy = e.pos[1] - last[1]
+                    cam.yaw += dx * 0.3
+                    cam.pitch = clamp(cam.pitch - dy * 0.3, -89.0, 89.0)
+                    last = e.pos
+                elif pan:
+                    dx = e.pos[0] - last[0]
+                    dy = e.pos[1] - last[1]
+                    pan_scale = cam.distance * 0.002
+                    cam.target[0] -= dx * pan_scale
+                    cam.target[1] += dy * pan_scale
+                    last = e.pos
+
+        lerp = 0.1
+        cam.target[0] = (1 - lerp) * cam.target[0] + lerp * uav.s.x
+        cam.target[1] = (1 - lerp) * cam.target[1] + lerp * uav.s.y
+        cam.target[2] = (1 - lerp) * cam.target[2] + lerp * uav.s.z
+
+        uav.step(dt)
+        if targets_move:
+            for t in targets:
+                t.step(dt, dem=dem)
+        for m in list(missiles):
+            m.step(dt)
+            if (not m.active) and (m.exploded and m.explode_time > 1.2 and len(m.sparks) == 0):
+                missiles.remove(m)
+
+    nearest = min(
+        targets, key=lambda T: (T.x - uav.s.x) ** 2 + (T.y - uav.s.y) ** 2 + (T.z - uav.s.z) ** 2
+    ) if targets else None
+
+    uav_lon, uav_lat = dem.env_to_lonlat(uav.s.x, uav.s.y)
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    cam.apply()
+
+    if fog_enabled:
+        glEnable(GL_FOG)
+    else:
+        glDisable(GL_FOG)
+
+    draw_grid(size=int(RENDER_RADIUS_M), step=100)
+    draw_axes(50)
+    draw_dem(dem, cam, center_xy=(uav.s.x, uav.s.y), radius_m=RENDER_RADIUS_M, z_scale=0.5)
+
+    draw_uav(uav)
+    for t in targets:
+        t.draw()
+    for m in missiles:
+        m.draw(dem)
+
+    if nearest:
+        uav_pos = np.array([uav.s.x, uav.s.y, uav.s.z], dtype=float)
+        tgt_pos = np.array([nearest.x, nearest.y, nearest.z], dtype=float)
+        los_clear = check_los(uav_pos, tgt_pos, dem)
+        glLineWidth(2.0)
+        glColor3f(1, 1, 1) if los_clear else glColor3f(1, 0, 0)
+        glBegin(GL_LINES)
+        glVertex3f(*uav_pos)
+        glVertex3f(*tgt_pos)
+        glEnd()
+        footprint_area = draw_camera_footprint(
+            uav, (nearest.x, nearest.y, nearest.z), fov_diag_deg=fov_diag, dem=dem, aspect_ratio=16 / 9
+        )
+    else:
+        footprint_area = None
+        los_clear = False
+
+    lines = [
+        f"pos (m): x={uav.s.x:7.1f}  y={uav.s.y:7.1f}  z={uav.s.z:6.1f}",
+        f"pos (lat/lon): lat={uav_lat:9.5f}  lon={uav_lon:10.5f}",
+        f"spd (m/s): {uav.s.u:5.1f}   yaw={uav.s.yaw:6.1f}deg  pitch={uav.s.pitch:5.1f}deg  roll={uav.s.roll:5.1f}deg",
+        f"FOV (diag): {fov_diag:4.1f}deg   LOS: {1 if los_clear else 0}   dt={dt*1000:.1f}ms",
+        f"Targets: {len(targets)}  Missiles: {len(missiles)}",
+        "M: Fire | N: Toggle targets | G: Spawn target | Wheel: Zoom | RMB drag: Orbit | MMB drag: Pan",
+    ]
+    if footprint_area is not None:
+        lines.append(f"Footprint area: {footprint_area:8.1f} m^2")
+    draw_hud(lines)
+    draw_debug_overlay()
+
+    if debug_frames < 3:
+        print(
+            f"[frame] cam_target=({cam.target[0]:.1f},{cam.target[1]:.1f},{cam.target[2]:.1f}) "
+            f"cam_dist={cam.distance:.1f} uav_pos=({uav.s.x:.1f},{uav.s.y:.1f},{uav.s.z:.1f}) fog={fog_enabled}"
+        )
+        err = glGetError()
+        if err:
+            print(f"[GL ERROR] frame: {err}")
+        debug_frames += 1
+
+    pygame.display.flip()
+
+    pygame.quit()
+
+
+if __name__ == "__main__":
+    main()

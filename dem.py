@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import rasterio
 from typing import Optional
@@ -10,20 +11,37 @@ class DEM:
         self.dataset = rasterio.open(path)
         self.elevation = self.dataset.read(1).astype(np.float32)
         self.transform = self.dataset.transform
+        self.min_elev = float(np.nanmin(self.elevation))
+        self.max_elev = float(np.nanmax(self.elevation))
         self._bounds = self.dataset.bounds
         self.xmin, self.ymin, self.xmax, self.ymax = self._bounds
+
+        # Local ENU world in meters centered on the DEM footprint
         self.env_xmin, self.env_xmax = -WORLD_HALF, WORLD_HALF
         self.env_ymin, self.env_ymax = -WORLD_HALF, WORLD_HALF
-        self.scale_x = (self.env_xmax - self.env_xmin) / (self.xmax - self.xmin)
-        self.scale_y = (self.env_ymax - self.env_ymin) / (self.ymax - self.ymin)
+
+        # Approximate meters-per-degree factors (sufficient for local scene)
+        self.lon0 = 0.5 * (self.xmin + self.xmax)
+        self.lat0 = 0.5 * (self.ymin + self.ymax)
+        self.m_per_deg_lat = 111320.0
+        self.m_per_deg_lon = math.cos(math.radians(self.lat0)) * 111320.0
 
     def env_to_dataset_xy(self, x_env, y_env):
-        x = self.xmin + (x_env - self.env_xmin) / self.scale_x
-        y = self.ymin + (y_env - self.env_ymin) / self.scale_y
-        col, row = ~self.transform * (x, y)
+        lon, lat = self.env_to_lonlat(x_env, y_env)
+        col, row = ~self.transform * (lon, lat)
         col = int(np.clip(col, 0, self.elevation.shape[1] - 1))
         row = int(np.clip(row, 0, self.elevation.shape[0] - 1))
         return row, col
+
+    def env_to_lonlat(self, x_env: float, y_env: float):
+        lon = self.lon0 + x_env / self.m_per_deg_lon
+        lat = self.lat0 + y_env / self.m_per_deg_lat
+        return lon, lat
+
+    def lonlat_to_env(self, lon: float, lat: float):
+        x_env = (lon - self.lon0) * self.m_per_deg_lon
+        y_env = (lat - self.lat0) * self.m_per_deg_lat
+        return x_env, y_env
 
     def get_height(self, x_env, y_env):
         r, c = self.env_to_dataset_xy(x_env, y_env)

@@ -57,6 +57,12 @@ from OpenGL.GL import (
     GL_SRC_ALPHA,
     GL_ONE_MINUS_SRC_ALPHA,
     GLfloat,
+    glGetString,
+    GL_VENDOR,
+    GL_RENDERER,
+    GL_VERSION,
+    GL_SHADING_LANGUAGE_VERSION,
+    glGetError,
 )
 from OpenGL.GLU import gluPerspective
 
@@ -71,6 +77,7 @@ from config import (
     WIN_W,
     WIN_H,
     WORLD_HALF,
+    RENDER_RADIUS_M,
     clamp,
 )
 from dem import DEM, check_los
@@ -81,11 +88,22 @@ from uav import UAV, UAVParams
 
 def main():
     dem = DEM(str(DEM_FILE))
+    print(f"[DEM] file: {DEM_FILE}")
+    print(
+        f"[DEM] shape: {dem.elevation.shape} lon/lat bounds: ({dem.xmin:.5f},{dem.ymin:.5f})-({dem.xmax:.5f},{dem.ymax:.5f})"
+    )
+    print(f"[DEM] elevation min/max: {dem.min_elev:.1f}/{dem.max_elev:.1f}")
 
     pygame.init()
     pygame.display.set_caption("UAV 6-DoF 3D + DEM + Missile (modular)")
     pygame.display.set_mode((WIN_W, WIN_H), DOUBLEBUF | OPENGL)
     clock = pygame.time.Clock()
+
+    # GL info
+    print("[GL] vendor:", glGetString(GL_VENDOR))
+    print("[GL] renderer:", glGetString(GL_RENDERER))
+    print("[GL] version:", glGetString(GL_VERSION))
+    print("[GL] GLSL:", glGetString(GL_SHADING_LANGUAGE_VERSION))
 
     glViewport(0, 0, WIN_W, WIN_H)
     glEnable(GL_DEPTH_TEST)
@@ -116,6 +134,8 @@ def main():
     pan = False
     last = (0, 0)
     fov_diag = DEFAULT_FOV_DIAG
+    fog_enabled = True
+    debug_frames = 0
 
     dt_smoothed = 1 / 60
     running = True
@@ -164,6 +184,8 @@ def main():
                     running = False
                 elif e.key == pygame.K_r:
                     uav.reset()
+                elif e.key == pygame.K_f:
+                    fog_enabled = not fog_enabled
                 elif e.key == pygame.K_n:
                     targets_move = not targets_move
                 elif e.key == pygame.K_g:
@@ -236,14 +258,23 @@ def main():
             targets, key=lambda T: (T.x - uav.s.x) ** 2 + (T.y - uav.s.y) ** 2 + (T.z - uav.s.z) ** 2
         ) if targets else None
 
+        uav_lon, uav_lat = dem.env_to_lonlat(uav.s.x, uav.s.y)
+
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         cam.apply()
 
-        draw_grid(size=int(WORLD_HALF), step=100)
+        if fog_enabled:
+            glEnable(GL_FOG)
+        else:
+            glDisable(GL_FOG)
+
+        glDisable(GL_BLEND)
+        draw_grid(size=int(RENDER_RADIUS_M), step=100)
         draw_axes(50)
-        draw_dem(dem, cam, z_scale=0.5)
+        draw_dem(dem, cam, center_xy=(uav.s.x, uav.s.y), radius_m=RENDER_RADIUS_M, z_scale=0.5)
+        glEnable(GL_BLEND)
 
         draw_uav(uav)
         for t in targets:
@@ -270,6 +301,7 @@ def main():
 
         lines = [
             f"pos (m): x={uav.s.x:7.1f}  y={uav.s.y:7.1f}  z={uav.s.z:6.1f}",
+            f"pos (lat/lon): lat={uav_lat:9.5f}  lon={uav_lon:10.5f}",
             f"spd (m/s): {uav.s.u:5.1f}   yaw={uav.s.yaw:6.1f}deg  pitch={uav.s.pitch:5.1f}deg  roll={uav.s.roll:5.1f}deg",
             f"FOV (diag): {fov_diag:4.1f}deg   LOS: {1 if los_clear else 0}   dt={dt*1000:.1f}ms",
             f"Targets: {len(targets)}  Missiles: {len(missiles)}",
@@ -279,6 +311,16 @@ def main():
             lines.append(f"Footprint area: {footprint_area:8.1f} m^2")
         draw_hud(lines)
 
+        if debug_frames < 3:
+            print(
+                f"[frame] cam_target=({cam.target[0]:.1f},{cam.target[1]:.1f},{cam.target[2]:.1f}) "
+                f"cam_dist={cam.distance:.1f} uav_pos=({uav.s.x:.1f},{uav.s.y:.1f},{uav.s.z:.1f}) fog={fog_enabled}"
+            )
+            err = glGetError()
+            if err:
+                print(f"[GL ERROR] frame: {err}")
+            debug_frames += 1
+
         pygame.display.flip()
 
     pygame.quit()
@@ -286,5 +328,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
