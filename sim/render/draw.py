@@ -32,6 +32,7 @@ from OpenGL.GL import (
     glVertex2f,
     glVertex3f,
     glGenTextures,
+    glDeleteTextures,
     GL_BLEND,
     GL_DEPTH_TEST,
     GL_LINES,
@@ -168,6 +169,7 @@ def draw_dem(
     move_threshold=500.0,
     z_scale=1.0,
 ):
+    dem.ensure_tile_for_env(center_xy[0], center_xy[1])
     elev = dem.elevation
     rows, cols = elev.shape
     global _dem_step_smoothed
@@ -383,6 +385,59 @@ def draw_hud(lines: List[str]):
     glEnd()
 
     glBindTexture(GL_TEXTURE_2D, 0)
+    glDisable(GL_TEXTURE_2D)
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+
+def draw_labels(labels: List[tuple]):
+    """Draw small 2D labels at given screen coords. Each label: (x, y, text, color)."""
+    if not labels:
+        return
+    _init_font()
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    glOrtho(0, WIN_W, 0, WIN_H, -1, 1)
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glEnable(GL_TEXTURE_2D)
+
+    for x, y, text, color in labels:
+        surf = _hud_font.render(text, True, color)
+        data = pygame.image.tostring(surf, "RGBA", True)
+        tw, th = surf.get_size()
+        tex_id = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, tex_id)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, data)
+
+        x0, y0 = x, y
+        x1, y1 = x0 + tw, y0 + th
+        glColor4f(1, 1, 1, 1)
+        glBegin(GL_QUADS)
+        glTexCoord2f(0, 0)
+        glVertex2f(x0, y0)
+        glTexCoord2f(1, 0)
+        glVertex2f(x1, y0)
+        glTexCoord2f(1, 1)
+        glVertex2f(x1, y1)
+        glTexCoord2f(0, 1)
+        glVertex2f(x0, y1)
+        glEnd()
+
+        glBindTexture(GL_TEXTURE_2D, 0)
+        glDeleteTextures(int(tex_id))
+
     glDisable(GL_TEXTURE_2D)
     glDisable(GL_BLEND)
     glEnable(GL_DEPTH_TEST)

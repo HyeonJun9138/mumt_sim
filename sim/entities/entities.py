@@ -27,11 +27,24 @@ from OpenGL.GL import (
 )
 
 from sim.config import clamp, wrap_deg, WORLD_HALF
+from sim.entities.threat import AirDefenseThreat
 from sim.world.dem import DEM
 
 
 class MovingTarget:
-    def __init__(self, x=300.0, y=0.0, vmin=6.0, vmax=16.0, tau=1.2, sigma=2.0, world_half: float = WORLD_HALF):
+    def __init__(
+        self,
+        x=300.0,
+        y=0.0,
+        vmin=6.0,
+        vmax=16.0,
+        tau=1.2,
+        sigma=2.0,
+        world_half: float = WORLD_HALF,
+        roam_center: Optional[tuple] = None,
+        roam_radius: Optional[float] = None,
+        threat: Optional[AirDefenseThreat] = None,
+    ):
         self.x, self.y, self.z = float(x), float(y), 0.0
         self.heading = random.uniform(0, 360.0)
         self.heading_rate = 0.0
@@ -39,9 +52,13 @@ class MovingTarget:
         self.vmin, self.vmax = vmin, vmax
         self.tau, self.sigma = tau, sigma
         self.world_half = world_half
+        self.roam_center = np.array(roam_center, dtype=float) if roam_center is not None else None
+        self.roam_radius = roam_radius
         self.v_tau, self.v_sigma = 4.0, 1.0
         self.color = (1.0, 0.4, 0.4)
         self.alive = True
+        self.threat = threat
+        self.z_offset = 5.0  # slight lift above terrain to stabilize LOS
 
     def step(self, dt: float, dem: Optional[DEM] = None):
         if not self.alive:
@@ -51,15 +68,23 @@ class MovingTarget:
         self.heading = wrap_deg(self.heading + self.heading_rate * dt)
         dv = (-(self.v - 0.5 * (self.vmin + self.vmax)) / self.v_tau + self.v_sigma * random.gauss(0, 1)) * dt
         self.v = clamp(self.v + dv, self.vmin, self.vmax)
-        margin = 0.15 * self.world_half
-        if abs(self.x) > self.world_half - margin or abs(self.y) > self.world_half - margin:
-            desired = math.degrees(math.atan2(-self.y, -self.x))
-            err = ((desired - self.heading + 540) % 360) - 180
-            self.heading_rate += 35.0 * clamp(err / 90.0, -1.0, 1.0) * dt
+        if self.roam_center is not None and self.roam_radius is not None:
+            vec = self.roam_center - np.array([self.x, self.y])
+            dist = np.linalg.norm(vec)
+            if dist > max(1.0, self.roam_radius * 0.7):
+                desired = math.degrees(math.atan2(vec[1], vec[0]))
+                err = ((desired - self.heading + 540) % 360) - 180
+                self.heading_rate += 35.0 * clamp(err / 90.0, -1.0, 1.0) * dt
+        else:
+            margin = 0.15 * self.world_half
+            if abs(self.x) > self.world_half - margin or abs(self.y) > self.world_half - margin:
+                desired = math.degrees(math.atan2(-self.y, -self.x))
+                err = ((desired - self.heading + 540) % 360) - 180
+                self.heading_rate += 35.0 * clamp(err / 90.0, -1.0, 1.0) * dt
         rad = math.radians(self.heading)
         self.x = clamp(self.x + math.cos(rad) * self.v * dt, -self.world_half, self.world_half)
         self.y = clamp(self.y + math.sin(rad) * self.v * dt, -self.world_half, self.world_half)
-        self.z = dem.get_height(self.x, self.y) if dem is not None else 0.0
+        self.z = dem.get_height(self.x, self.y) + self.z_offset if dem is not None else self.z_offset
 
     def draw(self):
         glPushMatrix()
