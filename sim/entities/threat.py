@@ -58,7 +58,9 @@ class AirDefenseThreat:
         x = min(x, 80.0)
         f_texposed = math.exp(x)
 
-        pd = (f_texposed * self.radar.P_fa) / (self.radar.a * self.radar.sigma + range_m ** 4)
+        # Use km-based range scaling to avoid vanishing probabilities at meter^4 scale
+        range_km = max(0.001, range_m / 1000.0)
+        pd = (f_texposed * self.radar.P_fa) / (self.radar.a * self.radar.sigma + range_km ** 4)
         pd = max(0.0, min(pd, 1.0))
 
         self.state.detected = (pd >= 1.0) or (random.random() < pd)

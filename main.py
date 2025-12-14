@@ -17,6 +17,8 @@
 
 
 import math
+import os
+import json
 import random
 import threading
 import time
@@ -29,6 +31,7 @@ from OpenGL.GL import (
     glClear,
     glClearColor,
     glColor3f,
+    glColor4f,
     glDisable,
     glEnable,
     glEnd,
@@ -81,6 +84,7 @@ from sim.config import (
     CLEAR_COLOR,
     DEFAULT_FOV_DIAG,
     DEM_FILE,
+    REPO_ROOT,
     FPS,
     FOG_COLOR,
     FOG_DENSITY,
@@ -92,11 +96,21 @@ from sim.config import (
     DEM_CACHE_MOVE_THRESHOLD_M,
     clamp,
 )
-from sim.world.dem import DEM, check_los
-from sim.render.draw import draw_axes, draw_camera_footprint, draw_dem, draw_grid, draw_hud, draw_uav, draw_labels
+from sim.world.dem import DEM, check_los, ray_intersect_dem
+from sim.render.draw import (
+    draw_axes,
+    draw_camera_footprint,
+    draw_dem,
+    draw_grid,
+    draw_hud,
+    draw_uav,
+    draw_labels,
+    draw_lah,
+)
 from sim.entities.entities import MovingTarget, Missile
 from sim.entities.threat import AirDefenseThreat, RadarParams, WeaponParams, WeaponType
 from sim.core.uav import UAV, UAVParams
+from sim.core.lah import LAH, LAHParams
 
 TARGET_SPAWNS = [
     # (x, y) in meters; edit this list to pre-place multiple targets
@@ -116,6 +130,180 @@ THREAT_WEAPON = WeaponParams(
 )
 THREAT_DEFAULT = AirDefenseThreat(radar=THREAT_RADAR, weapon=THREAT_WEAPON)
 
+_EPOCH_2000 = datetime(2000, 1, 1, tzinfo=timezone.utc)
+SOURCE_NAME = "test"
+MAX_FUEL_L = 1000.0  # spec max
+# 2-hour endurance target -> burn the full tank over ~7200s
+LAH_FUEL_BURN_LPS = MAX_FUEL_L / (2 * 3600.0)
+DEFAULT_FOV_ASPECT = 16 / 9
+_log = lambda msg: print(f"[sim-log] {msg}", flush=True)
+SCENARIO_PATH = REPO_ROOT / "mission" / "Scenario_2025-12-14T013406" / "SBC3"
+
+
+def now_ms_2000() -> int:
+    return int((datetime.now(timezone.utc) - _EPOCH_2000).total_seconds() * 1000)
+
+
+def _datalink_status_for_lah(lah_pos, snapshots, dem: DEM):
+    """Return LOS flags to UAV1/2/3 (indexes 3,4,5)."""
+
+    def _safe_snap(idx):
+        return snapshots[idx] if 0 <= idx < len(snapshots) else None
+
+    los_flags = []
+    for tgt_idx in (3, 4, 5):
+        tgt = _safe_snap(tgt_idx)
+        if tgt is None:
+            los_flags.append(False)
+            continue
+        los = check_los(np.array(lah_pos, dtype=float), np.array(tgt[:3], dtype=float), dem)
+        los_flags.append(bool(los))
+    return {
+        "isConnectedToUAV1": los_flags[0],
+        "isConnectedToUAV2": los_flags[1],
+        "isConnectedToUAV3": los_flags[2],
+    }
+
+
+def _leader_aircraft_id(crashed: list[bool]) -> int:
+    if len(crashed) >= 6:
+        if not crashed[3]:
+            return 4
+        if not crashed[4]:
+            return 5
+        if not crashed[5]:
+            return 6
+    # fallback priority even if crashed/absent
+    return 4 if len(crashed) >= 4 else 1
+
+
+def _fuel_warning(fuel_l: float) -> int:
+    pct = fuel_l / MAX_FUEL_L if MAX_FUEL_L > 0 else 0.0
+    if pct <= 0.01:
+        return 3
+    if pct <= 0.2:
+        return 2
+    return 1
+
+
+def _compute_footprint(uav_pos, tgt_pos, fov_diag_deg, dem: DEM, aspect_ratio=DEFAULT_FOV_ASPECT):
+    if tgt_pos is None:
+        return [], None, None
+    uav_pos = np.array(uav_pos, dtype=float)
+    forward = np.array(tgt_pos, dtype=float) - uav_pos
+    if np.linalg.norm(forward) < 1e-6:
+        return [], None, None
+    forward /= np.linalg.norm(forward)
+
+    fov_diag = math.radians(fov_diag_deg)
+    ar = aspect_ratio
+    fov_h = 2 * math.atan(math.tan(fov_diag / 2) * ar / math.sqrt(1 + ar**2))
+    fov_v = 2 * math.atan(math.tan(fov_diag / 2) * 1 / math.sqrt(1 + ar**2))
+
+    world_up = np.array([0, 0, 1], dtype=float)
+    right = np.cross(forward, world_up)
+    if np.linalg.norm(right) < 1e-6:
+        right = np.array([1, 0, 0], dtype=float)
+    right /= np.linalg.norm(right)
+    up = np.cross(right, forward)
+    up /= np.linalg.norm(up)
+
+    tan_h, tan_v = math.tan(fov_h / 2), math.tan(fov_v / 2)
+    # order: TL, TR, BR, BL
+    combos = [(-1, 1), (1, 1), (1, -1), (-1, -1)]
+    corners_env = []
+    for sx, sy in combos:
+        d = forward + sx * tan_h * right + sy * tan_v * up
+        d = d / np.linalg.norm(d)
+        hit = ray_intersect_dem(uav_pos, d, dem)
+        if hit is None:
+            return [], None, None
+        corners_env.append(hit)
+
+    footprint_lonlat = []
+    for c in corners_env:
+        lon, lat = dem.env_to_lonlat(c[0], c[1])
+        footprint_lonlat.append({"latitude": lat, "longitude": lon, "altitude": float(c[2])})
+
+    tgt_lon, tgt_lat = dem.env_to_lonlat(tgt_pos[0], tgt_pos[1])
+    center_coord = {"latitude": tgt_lat, "longitude": tgt_lon, "altitude": float(tgt_pos[2])}
+    return footprint_lonlat, center_coord, forward
+
+
+def _make_agent_state(idx, snap, uav_type, fuel_l, crashed, crippled, snapshots, dem: DEM, targets, fov_diag):
+    lon, lat = dem.env_to_lonlat(snap[0], snap[1])
+    health = 2 if crashed[idx] or crippled[idx] else 1
+    is_unmanned = uav_type != "LAH"
+    # pick nearest target for sensor/footprint
+    target = None
+    if targets:
+        target = min(targets, key=lambda T: (T.x - snap[0]) ** 2 + (T.y - snap[1]) ** 2 + (T.z - snap[2]) ** 2)
+        target_pos = (target.x, target.y, target.z)
+        target_id = getattr(target, "id", None) or targets.index(target) + 1
+    else:
+        target_pos = None
+        target_id = None
+
+    footprint_list, center_coord, _ = _compute_footprint(snap[:3], target_pos, fov_diag, dem)
+    sensor_info = {
+        "operationalMode": 1,
+        "sensorType": 2,
+        "fov": float(fov_diag),
+        "centerCoordinate": center_coord
+        or {"latitude": lat, "longitude": lon, "altitude": int(snap[2])},
+    }
+    if footprint_list:
+        sensor_info["footprintCornerList"] = footprint_list
+
+    leader_id = _leader_aircraft_id(crashed)
+    manned_info = None
+    if not is_unmanned:
+        manned_info = {
+            "weapons": {"type1": 10, "type2": 10, "type3": 10},
+            "datalinkStatus": _datalink_status_for_lah(snap[:3], snapshots, dem),
+        }
+    else:
+        fuel_warn = 1 if uav_type == "UAV" else _fuel_warning(fuel_l)
+        unmanned_info = {
+            "currentWaypointID": {"waypointID": 0},
+            "flightMode": 7,
+            "leaderAircraftID": {"aircraftID": leader_id},
+            "sensorInfo": sensor_info,
+            "payloadHealth": 2,
+            "fuelWarning": fuel_warn,
+        }
+        if target_id is not None:
+            unmanned_info["targetFollowing"] = {"targetID": target_id}
+    state = {
+        "aircraftID": idx + 1,
+        "isUnmanned": is_unmanned,
+        "coordinate": {"latitude": lat, "longitude": lon, "altitude": int(snap[2])},
+        "velocity": {"speed": float(snap[6]), "heading": float(snap[5])},
+        "fuel": max(0.0, min(fuel_l, MAX_FUEL_L)),
+        "health": health,
+        "mannedInfo": manned_info
+        or {
+            "weapons": {"type1": 0, "type2": 0, "type3": 0},
+            "datalinkStatus": {
+                "isConnectedToUAV1": False,
+                "isConnectedToUAV2": False,
+                "isConnectedToUAV3": False,
+            },
+        },
+        "unmannedInfo": unmanned_info if is_unmanned else {},
+    }
+    return state
+
+
+def build_agent_status_snapshot(uav_types, snapshots, fuel_levels, crashed, crippled, dem: DEM, targets, fov_diag):
+    agent_states = []
+    for i, snap in enumerate(snapshots):
+        fuel = fuel_levels[i] if i < len(fuel_levels) else 0.0
+        agent_states.append(
+            _make_agent_state(i, snap, uav_types[i], fuel, crashed, crippled, snapshots, dem, targets, fov_diag)
+        )
+    return {"timestamp": now_ms_2000(), "source": SOURCE_NAME, "agentStateList": agent_states}
+
 
 def uav_worker(idx, uav, dem, run_event, crashed_flags, crippled_flags, lock, time_scale, time_lock):
     prev = time.perf_counter()
@@ -129,6 +317,10 @@ def uav_worker(idx, uav, dem, run_event, crashed_flags, crippled_flags, lock, ti
         with lock:
             if not crashed_flags[idx]:
                 uav.step(dt)
+                # If crippled, force rapid descent and spinning regardless of commands
+                if crippled_flags[idx]:
+                    uav.s.z = max(0.0, uav.s.z - 30.0 * dt)
+                    uav.s.u = max(0.0, uav.s.u * 0.95)
                 ground_z = dem.get_height(uav.s.x, uav.s.y)
                 if uav.s.z <= ground_z + 0.5:
                     crashed_flags[idx] = True
@@ -151,7 +343,9 @@ def main():
     print(f"[DEM] elevation min/max: {dem.min_elev:.1f}/{dem.max_elev:.1f}")
 
     pygame.init()
-    pygame.display.set_caption("UAV 6-DoF 3D + DEM + Missile (modular)")
+    caption = os.getenv("SIM_INSTANCE_NAME", "UAV 6-DoF 3D + DEM + Missile (modular)")
+    pygame.display.set_caption(caption)
+    print(f"[sim] window caption: {caption}")
     pygame.display.set_mode((WIN_W, WIN_H), DOUBLEBUF | OPENGL)
     clock = pygame.time.Clock()
 
@@ -178,11 +372,13 @@ def main():
     glFogf(GL_FOG_DENSITY, FOG_DENSITY)
     glHint(GL_FOG_HINT, GL_NICEST)
 
-    params = UAVParams()
-    uavs = [UAV(params) for _ in range(3)]
+    params_uav = UAVParams()
+    params_lah = LAHParams()
+    uavs = [LAH(params_lah) for _ in range(3)] + [UAV(params_uav) for _ in range(3)]
+    uav_types = ["LAH"] * 3 + ["UAV"] * 3
     uav_locks = [threading.Lock() for _ in uavs]
-    # spread initial spawn slightly
-    offsets = [(-30.0, -30.0), (0.0, 0.0), (30.0, 30.0)]
+
+    offsets = [(-60.0, -60.0), (0.0, -60.0), (60.0, -60.0), (-60.0, 60.0), (0.0, 60.0), (60.0, 60.0)]
     for u, (ox, oy) in zip(uavs, offsets):
         u.s.x += ox
         u.s.y += oy
@@ -218,6 +414,8 @@ def main():
     trails = [[] for _ in uavs]
     crashed = [False for _ in uavs]
     crippled = [False for _ in uavs]
+    fuel_levels = [MAX_FUEL_L if t == "LAH" else 0.0 for t in uav_types]
+    latest_agent_status_0401 = None
 
     run_event = threading.Event()
     run_event.set()
@@ -243,6 +441,8 @@ def main():
 
     dt_smoothed = 1 / 60
     running = True
+    rotor_angle = 0.0
+    _log("entering main loop")
     while running:
         ms = clock.tick(FPS)
         raw_dt = max(0.0001, min(0.05, ms / 1000.0))
@@ -251,9 +451,17 @@ def main():
         with time_lock:
             time_scale_val = time_scale["value"]
         dt_sim = dt * time_scale_val
+        rotor_angle = (rotor_angle + 720.0 * dt_sim) % 360.0  # simple spin for visualization
+
+        for i, ttype in enumerate(uav_types):
+            if ttype == "LAH" and not crashed[i]:
+                fuel_levels[i] = max(0.0, fuel_levels[i] - LAH_FUEL_BURN_LPS * dt_sim)
+        if debug_frames < 3:
+            _log(f"frame start dt={dt:.4f} dt_sim={dt_sim:.4f} fuel_lah1={fuel_levels[0]:.1f}")
 
         keys = pygame.key.get_pressed()
         uav = uavs[active_idx]
+        is_lah = uav_types[active_idx] == "LAH"
         with uav_locks[active_idx]:
             if not crippled[active_idx]:
                 if keys[pygame.K_w]:
@@ -264,7 +472,7 @@ def main():
                     uav.cmd_throttle = 0.0
 
                 if keys[pygame.K_SPACE]:
-                    uav.cmd_straight()
+                    uav.cmd_hover() if is_lah else uav.cmd_straight()
                 else:
                     if keys[pygame.K_LEFT]:
                         uav.cmd_left()
@@ -285,6 +493,8 @@ def main():
         if keys[pygame.K_d]:
             fov_diag -= 15.0 * dt
         fov_diag = clamp(fov_diag, 1.2, 31.2)
+        if debug_frames < 1:
+            _log("after input/keys")
 
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
@@ -296,11 +506,16 @@ def main():
                     for i, u in enumerate(uavs):
                         with uav_locks[i]:
                             u.reset()
-                            u.s.x += offsets[i][0]
-                            u.s.y += offsets[i][1]
+                            sp = spawn_points[i] if i < len(spawn_points) else None
+                            if sp is not None:
+                                u.s.x, u.s.y, u.s.z = sp
+                            else:
+                                u.s.x += fallback_offsets[i][0]
+                                u.s.y += fallback_offsets[i][1]
                             crashed[i] = False
                             crippled[i] = False
                             trails[i].clear()
+                            fuel_levels[i] = MAX_FUEL_L if uav_types[i] == "LAH" else 0.0
                 elif e.key == pygame.K_f:
                     fog_enabled = not fog_enabled
                 elif e.key == pygame.K_n:
@@ -333,7 +548,9 @@ def main():
                         )
                     )
                 elif e.key == pygame.K_m:
-                    if targets:
+                    if uav_types[active_idx] != "LAH":
+                        print("[fire] Missiles available only on LAH (slots 1-3)")
+                    elif targets:
                         with uav_locks[active_idx]:
                             nearest = min(
                                 targets,
@@ -350,6 +567,12 @@ def main():
                     active_idx = 1
                 elif e.key == pygame.K_3 and len(uavs) > 2:
                     active_idx = 2
+                elif e.key == pygame.K_4 and len(uavs) > 3:
+                    active_idx = 3
+                elif e.key == pygame.K_5 and len(uavs) > 4:
+                    active_idx = 4
+                elif e.key == pygame.K_6 and len(uavs) > 5:
+                    active_idx = 5
             elif e.type == pygame.MOUSEBUTTONDOWN:
                 if e.button == 3:
                     orbit = True
@@ -380,6 +603,13 @@ def main():
                     cam.target[0] -= dx * pan_scale
                     cam.target[1] += dy * pan_scale
                     last = e.pos
+
+        if debug_frames < 1:
+            _log("after events loop")
+
+        # Re-evaluate active craft after handling switches
+        uav = uavs[active_idx]
+        is_lah = uav_types[active_idx] == "LAH"
 
         snapshots = []
         for i, u in enumerate(uavs):
@@ -412,6 +642,8 @@ def main():
         cam.target[0] = active_snap[0]
         cam.target[1] = active_snap[1]
         cam.target[2] = active_snap[2]
+        if debug_frames < 1:
+            _log("after snapshots/trails")
 
         if targets_move:
             for t in targets:
@@ -420,6 +652,8 @@ def main():
             m.step(dt_sim)
             if (not m.active) and (m.exploded and m.explode_time > 1.2 and len(m.sparks) == 0):
                 missiles.remove(m)
+        if debug_frames < 1:
+            _log("after target/missile step")
         detection_lines = []
         # Threat engagement: targets attack UAVs if detected
         for idx, u in enumerate(uavs):
@@ -451,6 +685,8 @@ def main():
                         spin_sign = 1.0 if random.random() < 0.5 else -1.0
                         u.cmd_roll_rate = u.p.max_roll_rate_dps * 0.6 * spin_sign
                         u.cmd_yaw_rate = u.p.max_yaw_rate_dps * 0.6 * spin_sign
+        if debug_frames < 1:
+            _log("after threat eval")
         # Remove destroyed targets
         targets = [t for t in targets if getattr(t, "alive", True)]
 
@@ -462,6 +698,12 @@ def main():
             if targets
             else None
         )
+
+        latest_agent_status_0401 = build_agent_status_snapshot(
+            uav_types, snapshots, fuel_levels, crashed, crippled, dem, targets, fov_diag
+        )
+        if debug_frames < 1:
+            _log("after agent status build")
 
         uav_lon, uav_lat = dem.env_to_lonlat(active_snap[0], active_snap[1])
 
@@ -493,7 +735,10 @@ def main():
             if len(trail) >= 2:
                 glDisable(GL_LINE_STIPPLE)
                 glLineWidth(2.0 if idx == active_idx else 1.5)
-                glColor3f(0.2, 0.6, 1.0) if idx == active_idx else glColor3f(0.4, 0.5, 0.7)
+                if idx == active_idx:
+                    glColor3f(0.2, 0.6, 1.0)
+                else:
+                    glColor3f(0.4, 0.5, 0.7)
                 glBegin(GL_LINE_STRIP)
                 for p in trail:
                     glVertex3f(*p)
@@ -501,21 +746,24 @@ def main():
 
         for i, u in enumerate(uavs):
             with uav_locks[i]:
-                draw_uav(u)
+                if uav_types[i] == "LAH":
+                    draw_lah(u, rotor_angle)
+                else:
+                    draw_uav(u)
         for t in targets:
             t.draw()
         for m in missiles:
             m.draw(dem)
         # Threat LOS lines (targets -> UAVs)
         if detection_lines:
-            glLineWidth(1.5)
+            glLineWidth(1.0)
             glEnable(GL_LINE_STIPPLE)
             glLineStipple(1, 0x0F0F)
             for info in detection_lines:
                 if info["los"]:
-                    glColor3f(1.0, 0.2, 0.2) if info["detected"] else glColor3f(1.0, 0.2, 0.2)
+                    glColor4f(1.0, 0.25, 0.25, 0.5)
                 else:
-                    glColor3f(0.45, 0.45, 0.45)
+                    glColor4f(0.45, 0.45, 0.45, 0.5)
                 glBegin(GL_LINES)
                 glVertex3f(*info["tpos"])
                 glVertex3f(*info["upos"])
@@ -531,14 +779,19 @@ def main():
             sx, sy, sz = gluProject(snap[0], snap[1], snap[2] + 10.0, model, proj, viewport)
             if 0.0 <= sz <= 1.0:
                 color = (255, 80, 80) if idx == active_idx else (220, 220, 220)
-                label_entries.append((sx, sy + 8, f"uav{idx + 1}", color))
+                name = f"LAH{idx + 1}" if idx < 3 else f"UAV{idx - 2}"
+                speed_text = f"{snap[6]:.0f}m/s"
+                state_tag = "FALL" if crippled[idx] else ("CRASH" if crashed[idx] else "")
+                text = f"{name} {speed_text}" if not state_tag else f"{name} {speed_text} {state_tag}"
+                label_entries.append((sx, sy + 8, text, color))
         for tidx, t in enumerate(targets):
             sx, sy, sz = gluProject(t.x, t.y, t.z + 10.0, model, proj, viewport)
             if 0.0 <= sz <= 1.0:
                 label_entries.append((sx, sy + 8, f"target{tidx + 1}", (255, 200, 80)))
         draw_labels(label_entries)
 
-        if nearest:
+        footprint_area = None  # reset each frame
+        if nearest and (not is_lah):
             uav_pos = np.array([active_snap[0], active_snap[1], active_snap[2]], dtype=float)
             tgt_pos = np.array([nearest.x, nearest.y, nearest.z], dtype=float)
             los_clear = check_los(uav_pos, tgt_pos, dem)
@@ -561,16 +814,15 @@ def main():
                     z_scale=1.0,
                 )
         else:
-            footprint_area = None
             los_clear = False
 
         lines = [
-            f"Active: UAV{active_idx + 1}  pos (m): x={active_snap[0]:7.1f}  y={active_snap[1]:7.1f}  z={active_snap[2]:6.1f}",
+            f"Active: {'LAH' if is_lah else 'UAV'}{active_idx + 1}  pos (m): x={active_snap[0]:7.1f}  y={active_snap[1]:7.1f}  z={active_snap[2]:6.1f}",
             f"pos (lat/lon): lat={uav_lat:9.5f}  lon={uav_lon:10.5f}",
             f"spd (m/s): {active_snap[6]:5.1f}   yaw={active_snap[5]:6.1f}deg  pitch={active_snap[4]:5.1f}deg  roll={active_snap[3]:5.1f}deg",
             f"FOV (diag): {fov_diag:4.1f}deg   LOS: {1 if los_clear else 0}   dt={dt_sim*1000:.1f}ms  time x{time_scale_val:.1f}",
             f"Targets: {len(targets)}  Missiles: {len(missiles)}",
-            "1/2/3: switch UAV | M: Fire | N: Toggle targets | G: Spawn target | Wheel: Zoom | RMB drag: Orbit | MMB drag: Pan",
+            "1-6: switch craft (1-3 LAH, 4-6 UAV) | M: Fire (LAH only) | N: Toggle targets | G: Spawn target | Wheel: Zoom | RMB drag: Orbit | MMB drag: Pan",
         ]
         if footprint_area is not None:
             lines.append(f"Footprint area: {footprint_area:8.1f} m^2")
@@ -579,7 +831,7 @@ def main():
             lines.append(f"Status: DAMAGED UAVs: {', '.join(crippled_ids)} (falling)")
         if any(crashed):
             crashed_ids = [str(i + 1) for i, c in enumerate(crashed) if c]
-            lines.append(f"Status: CRASHED UAVs: {', '.join(crashed_ids)} (press R to reset)")
+            lines.append(f"Status: CRASHED craft: {', '.join(crashed_ids)} (press R to reset)")
         draw_hud(lines)
 
         if debug_frames < 3:
@@ -594,6 +846,8 @@ def main():
             debug_frames += 1
 
         pygame.display.flip()
+        if debug_frames < 2:
+            _log("after display flip")
 
     run_event.clear()
     for t in workers:
@@ -603,3 +857,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+import traceback

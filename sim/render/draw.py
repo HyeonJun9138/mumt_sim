@@ -68,6 +68,7 @@ from sim.core.camera import OrbitCamera
 from sim.config import WIN_W, WIN_H, clamp
 from sim.world.dem import DEM, ray_intersect_dem
 from sim.core.uav import UAV
+from sim.core.lah import LAH
 
 _hud_font = None
 _hud_tex_id = None
@@ -76,7 +77,8 @@ _dem_debug_logged = False
 _gl_info_logged = False
 _dem_step_smoothed = 2.0
 _dem_cache = {"center": None, "radius": None, "row_min": 0, "row_max": 0, "col_min": 0, "col_max": 0}
-
+_dem_clamp_logged = False
+_dem_step_cap_logged = False
 
 def draw_axes(length=50.0, width=2.0):
     glLineWidth(width)
@@ -160,6 +162,69 @@ def draw_uav(uav: UAV):
     glPopMatrix()
 
 
+def draw_lah_mesh(main_rot_deg: float = 0.0, tail_rot_deg: float = 0.0):
+    glColor3f(0.8, 0.85, 0.9)
+    glBegin(GL_TRIANGLES)
+    glVertex3f(7.0, 0, 0.0)
+    glVertex3f(-4.0, 1.5, 0.6)
+    glVertex3f(-4.0, -1.5, 0.6)
+    glVertex3f(7.0, 0, 0.0)
+    glVertex3f(-4.0, -1.5, -0.6)
+    glVertex3f(-4.0, 1.5, -0.6)
+    glEnd()
+    glBegin(GL_QUADS)
+    # tail boom
+    glVertex3f(-4.0, -0.6, 0.0)
+    glVertex3f(-10.0, -0.6, 0.0)
+    glVertex3f(-10.0, 0.6, 0.0)
+    glVertex3f(-4.0, 0.6, 0.0)
+    # skids
+    glVertex3f(-2.0, -2.8, -0.8)
+    glVertex3f(4.0, -2.8, -0.8)
+    glVertex3f(4.0, -2.3, -0.8)
+    glVertex3f(-2.0, -2.3, -0.8)
+    glVertex3f(-2.0, 2.8, -0.8)
+    glVertex3f(4.0, 2.8, -0.8)
+    glVertex3f(4.0, 2.3, -0.8)
+    glVertex3f(-2.0, 2.3, -0.8)
+    glEnd()
+    # main rotor (cross)
+    glColor3f(0.2, 0.2, 0.2)
+    glLineWidth(2.0)
+    glPushMatrix()
+    glTranslatef(0, 0, 1.2)
+    glRotatef(main_rot_deg, 0, 0, 1)
+    glBegin(GL_LINES)
+    glVertex3f(-6.0, 0, 0.0)
+    glVertex3f(6.0, 0, 0.0)
+    glVertex3f(0, -6.0, 0.0)
+    glVertex3f(0, 6.0, 0.0)
+    glEnd()
+    glPopMatrix()
+    # tail rotor
+    glPushMatrix()
+    glTranslatef(-10.0, 0, 0.0)
+    glRotatef(tail_rot_deg, 1, 0, 0)
+    glBegin(GL_LINES)
+    glVertex3f(0, 0, 0.8)
+    glVertex3f(0, 0, -0.8)
+    glEnd()
+    glPopMatrix()
+
+
+def draw_lah(lah: LAH, rotor_angle: float):
+    s = lah.s
+    glPushMatrix()
+    glTranslatef(s.x, s.y, s.z)
+    glRotatef(-s.yaw, 0, 0, 1)
+    glRotatef(-s.pitch, 0, 1, 0)
+    glRotatef(s.roll, 1, 0, 0)
+    glScalef(2.0, 2.0, 2.0)
+    draw_lah_mesh(main_rot_deg=rotor_angle, tail_rot_deg=rotor_angle * 4.0)
+    draw_body_axes()
+    glPopMatrix()
+
+
 def draw_dem(
     dem: DEM,
     cam: OrbitCamera,
@@ -172,11 +237,8 @@ def draw_dem(
     dem.ensure_tile_for_env(center_xy[0], center_xy[1])
     elev = dem.elevation
     rows, cols = elev.shape
-    global _dem_step_smoothed
-    # Moderate sampling density (closer to original)
-    desired_step = clamp(1 + cam.distance / 600.0, 1, 8)
-    _dem_step_smoothed = 0.9 * _dem_step_smoothed + 0.1 * desired_step  # smoother transitions
-    step = max(2, int(round(_dem_step_smoothed)))  # avoid overly dense sampling when zoomed in
+    # Fixed sampling step to avoid visible changes across frames
+    step = 10
     glColor3f(0.28, 0.53, 0.28)
     glLineWidth(1.0)
 
@@ -210,8 +272,12 @@ def draw_dem(
 
         # Fallback to full render if the cropped window collapses (should be rare)
         if (row_max - row_min) < 2 or (col_max - col_min) < 2:
-            row_min, row_max = 0, rows - 1
-            col_min, col_max = 0, cols - 1
+            if not _dem_debug_logged:
+                print(
+                    f"[draw_dem] window collapsed at ({cx:.1f},{cy:.1f}); skipping DEM draw instead of rendering full tile"
+                )
+                _dem_debug_logged = True
+            return
 
         row_min, row_max = int(row_min), int(row_max)
         col_min, col_max = int(col_min), int(col_max)
@@ -225,6 +291,19 @@ def draw_dem(
             "col_max": col_max,
         }
 
+    # Cap density so we never push absurd vertex counts (prevents sudden GPU stalls)
+    row_span = row_max - row_min
+    col_span = col_max - col_min
+    max_vertices = 120_000
+    est = max(1, (row_span // step) * (col_span // step))
+    if est > max_vertices:
+        step_cap = int(math.ceil(math.sqrt((row_span * col_span) / max_vertices)))
+        step = max(step, step_cap)
+        global _dem_step_cap_logged
+        if not _dem_step_cap_logged:
+            print(f"[draw_dem] step capped to {step} to keep vertices under {max_vertices}")
+            _dem_step_cap_logged = True
+
     if not _dem_debug_logged:
         print(
             f"[draw_dem] rows {row_min}-{row_max} cols {col_min}-{col_max} step {step} elev {dem.min_elev:.1f}/{dem.max_elev:.1f}"
@@ -235,6 +314,7 @@ def draw_dem(
     if err:
         print(f"[GL ERROR] during draw_dem: {err}")
 
+    # Row-wise strips
     for r_idx in range(row_min, row_max, step):
         glBegin(GL_LINE_STRIP)
         for c_idx in range(col_min, col_max, step):
@@ -243,7 +323,8 @@ def draw_dem(
             z_env = elev[r_idx, c_idx] * z_scale
             glVertex3f(x_env, y_env, z_env)
         glEnd()
-    for c_idx in range(col_min, col_max, step * 2):
+    # Column-wise strips to restore crosshatch grid
+    for c_idx in range(col_min, col_max, step):
         glBegin(GL_LINE_STRIP)
         for r_idx in range(row_min, row_max, step):
             lon, lat = dem.transform * (c_idx, r_idx)
@@ -319,9 +400,9 @@ def _init_font():
     if _hud_font is None:
         pygame.font.init()
         try:
-            _hud_font = pygame.font.SysFont("Consolas", 18)
+            _hud_font = pygame.font.SysFont("Consolas", 15)
         except Exception:
-            _hud_font = pygame.font.SysFont(None, 18)
+            _hud_font = pygame.font.SysFont(None, 15)
 
 
 def draw_hud(lines: List[str]):
