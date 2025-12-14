@@ -5,7 +5,7 @@ from typing import Optional, Tuple, List
 
 import numpy as np
 
-from sim.world.dem import ray_intersect_dem
+from sim.world.dem import check_los, ray_intersect_dem
 
 _EPOCH_2000 = datetime(2000, 1, 1, tzinfo=timezone.utc)
 
@@ -32,7 +32,7 @@ def _datalink_status_for_lah(lah_pos, snapshots, dem):
         if tgt is None:
             los_flags.append(False)
             continue
-        los = dem.check_los(np.array(lah_pos, dtype=float), np.array(tgt[:3], dtype=float))
+        los = check_los(np.array(lah_pos, dtype=float), np.array(tgt[:3], dtype=float), dem)
         los_flags.append(bool(los))
     return {
         "isConnectedToUAV1": los_flags[0],
