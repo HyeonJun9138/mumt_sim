@@ -25,7 +25,7 @@ if not DEM_FILE.exists():
 # Rendering defaults
 DEFAULT_FOV_DIAG = 10.0
 FOG_COLOR = (0.06, 0.07, 0.09, 1.0)
-FOG_DENSITY = 0.0008
+FOG_DENSITY = 0.0005
 CLEAR_COLOR = (0.06, 0.07, 0.09, 1.0)
 
 

@@ -710,6 +710,78 @@ def tune_pid_gains(
     return best_gains, report
 
 
+def sweep_time_scales(
+    base_waypoints: List[Tuple[float, float, float]],
+    time_scales: List[float],
+    *,
+    speed_target: float = 90.0,
+    pos_tol: float = 30.0,
+    n_global: int = 160,
+    keep_top: int = 10,
+    n_restarts: int = 6,
+    local_iters: int = 70,
+    seed: int = 0,
+    dt_coarse: float = 0.02,
+    T_coarse: float = 70.0,
+    dt_fine: float = 0.01,
+    T_fine: float = 95.0,
+    save_dir: str | Path = "test/uav_pid_db",
+    db_name: str = "uav_pid_db.json",
+    aggregate_path: str | Path | None = None,
+):
+    """
+    Run tuning for multiple time_scale values (dt scaled accordingly) and save a DB JSON with per-scale gains.
+    Also writes an aggregated DB if aggregate_path is provided.
+    """
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+    db_path = save_dir / db_name
+
+    prefix = Path(db_name).stem.replace("_db", "")
+    records = []
+    for ts in time_scales:
+        ts = float(ts)
+        rep_path = save_dir / f"{prefix}_scale_{ts:.2f}.report.json"
+        gains_path = save_dir / f"{prefix}_scale_{ts:.2f}.json"
+        print(f"[sweep] time_scale={ts:.2f} dt_coarse={dt_coarse*ts:.4f} dt_fine={dt_fine*ts:.4f}")
+        gains_ts, rep_ts = tune_pid_gains(
+            base_waypoints,
+            speed_target=speed_target,
+            pos_tol=pos_tol,
+            n_global=n_global,
+            keep_top=keep_top,
+            n_restarts=n_restarts,
+            local_iters=local_iters,
+            seed=seed,
+            dt_coarse=dt_coarse * ts,
+            T_coarse=T_coarse,
+            dt_fine=dt_fine * ts,
+            T_fine=T_fine,
+            save_path=gains_path,
+            report_path=rep_path,
+        )
+        records.append(
+            {
+                "time_scale": ts,
+                "dt_coarse": dt_coarse * ts,
+                "dt_fine": dt_fine * ts,
+                "best_score": float(rep_ts["best_score"]),
+                "best_stage": rep_ts.get("best_stage"),
+                "gains": gains_ts.__dict__,
+                "report_path": str(rep_path),
+                "gains_path": str(gains_path),
+            }
+        )
+    _save_json_atomic(db_path, {"records": records})
+    if aggregate_path is not None:
+        agg_path = Path(aggregate_path)
+        agg_path.parent.mkdir(parents=True, exist_ok=True)
+        _save_json_atomic(agg_path, {"records": records})
+        print(f"[sweep] saved aggregate DB to {agg_path}")
+    print(f"[sweep] saved DB with {len(records)} entries to {db_path}")
+    return db_path, records
+
+
 # -----------------------------
 # Plot / GUI
 # -----------------------------
@@ -874,10 +946,27 @@ def interactive_gui(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PID waypoint tracker demo with auto-tuning and checkpoint saving.")
     parser.add_argument("--tune", action="store_true", help="run auto-tuning and update best gains while tuning")
-    parser.add_argument("--save", type=str, default="test/pid_tuned_gains.json", help="path to save tuned gains")
+    parser.add_argument("--save", type=str, default="test/uav_pid_db/uav_pid_tuned_gains.json", help="path to save tuned gains")
     parser.add_argument("--report", type=str, help="path to save tuning report json (default: <save>.report.json)")
     parser.add_argument("--load", type=str, help="load gains from json (overrides auto-load from --save if given)")
     parser.add_argument("--no-gui", action="store_true", help="do not open GUI (useful if only tuning)")
+    parser.add_argument(
+        "--sweep-time-scales",
+        type=str,
+        help="comma-separated time_scale values to tune per-scale gains (dt scaled) and save DB; disables GUI",
+    )
+    parser.add_argument(
+        "--sweep-dir",
+        type=str,
+        default="test/uav_pid_db",
+        help="directory to save per-scale gains/reports (default: test/uav_pid_db)",
+    )
+    parser.add_argument(
+        "--aggregate",
+        type=str,
+        default="sim/runtime/controllers/uav_pid_db.json",
+        help="path to save aggregated DB json for simulator (default: sim/runtime/controllers/uav_pid_db.json)",
+    )
     args = parser.parse_args()
 
     wp_demo = [
@@ -890,6 +979,8 @@ if __name__ == "__main__":
 
     save_path = args.save
     report_path = args.report
+    save_path = str(Path(save_path))
+    report_path = str(Path(report_path)) if report_path else None
     if report_path is None:
         sp = Path(save_path)
         if sp.suffix:
@@ -912,6 +1003,32 @@ if __name__ == "__main__":
         if g is not None:
             gains = g
             print(f"[auto-load] gains loaded from {save_path}: {gains}")
+
+    # 2.5) time_scale sweep DB 생성 모드
+    if args.sweep_time_scales:
+        scales = [float(s.strip()) for s in args.sweep_time_scales.split(",") if s.strip()]
+        if not scales:
+            print("[sweep] no valid time_scale values provided")
+        else:
+            sweep_time_scales(
+                wp_demo,
+                scales,
+                speed_target=90.0,
+                pos_tol=30.0,
+                n_global=180,
+                keep_top=12,
+                n_restarts=7,
+                local_iters=80,
+                seed=0,
+                dt_coarse=0.02,
+                T_coarse=70.0,
+                dt_fine=0.01,
+                T_fine=95.0,
+                save_dir=Path(args.sweep_dir),
+                db_name="uav_pid_db.json",
+                aggregate_path=args.aggregate,
+            )
+        exit(0)
 
     # 3) 튜닝 수행 (중간 best 값은 바로바로 --save에 저장됨)
     if args.tune:

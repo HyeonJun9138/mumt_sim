@@ -73,6 +73,7 @@ from sim.core.lah import LAH
 _hud_font = None
 _hud_tex_id = None
 _hud_size = (0, 0)
+_font_cache = {}
 _dem_debug_logged = False
 _gl_info_logged = False
 _dem_step_smoothed = 2.0
@@ -409,15 +410,53 @@ def draw_camera_footprint(
     return area, corners_sorted
 
 
+def draw_polyline(points: list[tuple[float, float, float]], color=(0.4, 1.0, 0.4), width=2.0, stipple=True):
+    if len(points) < 2:
+        return
+    glColor3f(*color)
+    glLineWidth(width)
+    if stipple:
+        glEnable(GL_LINE_STIPPLE)
+        glLineStipple(1, 0x0C0C)
+    glBegin(GL_LINE_STRIP)
+    for p in points:
+        glVertex3f(p[0], p[1], p[2])
+    glEnd()
+    if stipple:
+        glDisable(GL_LINE_STIPPLE)
+
+
+def _get_font(size: int):
+    if size in _font_cache:
+        return _font_cache[size]
+    pygame.font.init()
+    font_candidates = [
+        "Malgun Gothic",
+        "??? ???",
+        "Noto Sans CJK KR",
+        "NanumGothic",
+        "Consolas",
+        None,
+    ]
+    chosen = None
+    for fname in font_candidates:
+        try:
+            font = pygame.font.SysFont(fname, size)
+            # Ensure chosen font can render a basic Korean glyph; otherwise keep searching.
+            if font is not None and font.render("??", True, (0, 0, 0)).get_width() > 0:
+                chosen = font
+                break
+        except Exception:
+            font = None
+    if chosen is None:
+        chosen = pygame.font.SysFont(None, size)
+    _font_cache[size] = chosen
+    return chosen
+
+
 def _init_font():
     global _hud_font
-    if _hud_font is None:
-        pygame.font.init()
-        try:
-            _hud_font = pygame.font.SysFont("Consolas", 15)
-        except Exception:
-            _hud_font = pygame.font.SysFont(None, 15)
-
+    _hud_font = _get_font(15)
 
 def draw_hud(lines: List[str]):
     global _hud_tex_id, _hud_size
@@ -506,8 +545,9 @@ def draw_labels(labels: List[tuple]):
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
     glEnable(GL_TEXTURE_2D)
 
+    label_font = _get_font(13)
     for x, y, text, color in labels:
-        surf = _hud_font.render(text, True, color)
+        surf = label_font.render(text, True, color)
         data = pygame.image.tostring(surf, "RGBA", True)
         tw, th = surf.get_size()
         tex_id = glGenTextures(1)

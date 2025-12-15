@@ -1,4 +1,5 @@
 import json
+import re
 import math
 import os
 import queue
@@ -94,6 +95,7 @@ from sim.config import (
 from sim.core.camera import OrbitCamera
 from sim.entities.entities import Missile, MovingTarget
 from sim.entities.threat import AirDefenseThreat
+from sim.runtime.controllers import DEFAULT_TUNED_GAINS, PIDGains, WaypointPIDController, WaypointTarget, load_pid_gains
 from sim.render.draw import (
     draw_axes,
     draw_camera_footprint,
@@ -102,9 +104,10 @@ from sim.render.draw import (
     draw_hud,
     draw_labels,
     draw_lah,
+    draw_polyline,
     draw_uav,
 )
-from sim.world.dem import DEM, check_los
+from sim.world.dem import DEM, check_los, ray_intersect_dem
 from .constants import INITIAL_OFFSETS, TARGET_ROAM_RADIUS_M, TARGET_SPEED_RANGE, THREAT_RADAR, THREAT_WEAPON
 from .state import SimulationState, build_initial_state
 from .workers import run_uav_process
@@ -141,6 +144,17 @@ class SimulationApp:
         self.mission_reference_path: Path | None = None
         self.flight_path_root: Path = REPO_ROOT / "log" / "EP-000001" / "database_EP_000001" / "FlightPath"
         self.enable_flight_paths: bool = False
+        self.enable_uav_autopilot: bool = True
+        self.pid_gains_path: Path = REPO_ROOT / "test" / "uav_pid_db" / "uav_pid_tuned_gains.json"
+        self.pid_gains_path_lah: Path = REPO_ROOT / "test" / "lah_pid_db" / "lah_pid_tuned_gains.json"
+        self.pid_db_path_uav: Path = REPO_ROOT / "sim" / "runtime" / "controllers" / "uav_pid_db.json"
+        self.pid_db_path_lah: Path = REPO_ROOT / "sim" / "runtime" / "controllers" / "lah_pid_db.json"
+        self.pid_db_cache: dict[str, list[dict]] = {}
+        self.uav_autopilots: list[WaypointPIDController | None] = []
+        self.uav_filming_props: list[dict | None] = []
+        self.uav_current_wp_ids: list[int | None] = []
+        self.uav_line_search_state: list[dict | None] = []
+        self.uav_filming_target: list[tuple[float, float, float] | None] = []
 
     def _uav_state_tuple(self, uav):
         return (
@@ -168,6 +182,7 @@ class SimulationApp:
             self._ensure_spawn_above_dem()
         if self.enable_flight_paths:
             self._load_flight_paths()
+        self._init_uav_autopilots()
         self._init_display()
         self._start_workers()
         self._start_logger()
@@ -188,6 +203,8 @@ class SimulationApp:
                 nearest = self._nearest_target(active_snap)
                 self._update_targets_and_missiles(dt_sim)
                 detection_lines = self._evaluate_threats(dt_sim)
+                # Run autopilots over the full sim dt using fixed-size control steps to stay stable at high time_scale.
+                self._update_autopilots(dt_sim)
                 self._send_controls_to_workers(time_scale_val)
                 self._remove_destroyed_targets()
                 self.state.latest_agent_status_0401 = build_agent_status_snapshot(
@@ -360,7 +377,8 @@ class SimulationApp:
         dt_sim = dt * time_scale_val
         # Rotor angle uses fixed step scaled for stable visuals (not tied to frame jitter).
         dt_sim_step = self.sim_step * time_scale_val
-        self.rotor_angle = (self.rotor_angle + 720.0 * dt_sim_step) % 360.0
+        # Spin rotor visuals; bumped multiplier for a faster-looking main rotor.
+        self.rotor_angle = (self.rotor_angle + 1440.0 * dt_sim_step) % 360.0
         if self.debug_frames < 3:
             _log(f"frame start dt={dt:.4f} dt_sim={dt_sim:.4f} fuel_lah1={self.state.fuel_levels[0]:.1f}")
         return dt, dt_sim, dt_sim_step, time_scale_val
@@ -434,11 +452,13 @@ class SimulationApp:
         elif key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
             with self.state.time_lock:
                 self.state.time_scale["value"] = clamp(self.state.time_scale["value"] + 1.0, 0.1, 100.0)
-            print(f"[time] scale -> {self.state.time_scale['value']:.1f}x")
+            ts = self.state.time_scale["value"]
+            print(f"[time] scale -> {ts:.1f}x (dt~{self.dt_smoothed:.4f}s, dt_sim~{self.dt_smoothed * ts:.4f}s)")
         elif key in (pygame.K_MINUS, pygame.K_KP_MINUS):
             with self.state.time_lock:
                 self.state.time_scale["value"] = clamp(self.state.time_scale["value"] - 1.0, 0.1, 100.0)
-            print(f"[time] scale -> {self.state.time_scale['value']:.1f}x")
+            ts = self.state.time_scale["value"]
+            print(f"[time] scale -> {ts:.1f}x (dt~{self.dt_smoothed:.4f}s, dt_sim~{self.dt_smoothed * ts:.4f}s)")
         elif key == pygame.K_g:
             self._spawn_target_near_camera()
         elif key == pygame.K_m:
@@ -617,6 +637,232 @@ class SimulationApp:
             return None
         return min(candidates, key=lambda p: p[0])[1]
 
+    def _compute_filming_target(self, idx: int, filming_prop: dict | None):
+        """Legacy single-shot compute (fallback only)."""
+        return self._default_downward_target(self.state.uavs[idx])
+
+    def _default_downward_target(self, uav):
+        # look straight down relative to aircraft (pitch -90)
+        dir_vec = np.array([0.0, 0.0, -1.0], dtype=float)
+        origin = np.array([uav.s.x, uav.s.y, uav.s.z], dtype=float)
+        hit = ray_intersect_dem(origin, dir_vec, self.dem)
+        if hit is not None:
+            return tuple(hit.tolist())
+        return tuple((origin + dir_vec * 1000.0).tolist())
+
+    def _load_gain_db(self, path: Path) -> list[dict] | None:
+        key = str(path.resolve())
+        if key in self.pid_db_cache:
+            return self.pid_db_cache[key]
+        # 1) Primary: aggregated DB file
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                records = data.get("records") if isinstance(data, dict) else None
+                if isinstance(records, list):
+                    self.pid_db_cache[key] = records
+                    return records
+            except Exception as e:
+                print(f"[pid-db] failed to load {path}: {e}")
+        # 2) Fallback: scan scale-specific files (e.g., pid_tuned_scale_*.json)
+        records: list[dict] = []
+        prefix = path.stem
+        if prefix.endswith("_db"):
+            prefix = prefix[: -len("_db")]
+        pattern = f"{prefix}_scale_*.json"
+        for f in sorted(path.parent.glob(pattern)):
+            m = re.search(r"_scale_([0-9.]+)", f.stem)
+            if not m:
+                continue
+            try:
+                ts = float(m.group(1))
+            except Exception:
+                continue
+            g = load_pid_gains(f)
+            if g is None:
+                continue
+            records.append(
+                {
+                    "time_scale": ts,
+                    "gains": g.__dict__,
+                    "gains_path": str(f),
+                }
+            )
+        if records:
+            self.pid_db_cache[key] = records
+            print(f"[pid-db] built ad-hoc records from pattern {pattern} ({len(records)} entries)")
+            return records
+        return None
+
+    def _pick_gains_for_scale(self, db_path: Path, fallback_path: Path, time_scale: float) -> PIDGains:
+        records = self._load_gain_db(db_path)
+        if records:
+            best = None
+            best_diff = float("inf")
+            for r in records:
+                ts = r.get("time_scale")
+                g = r.get("gains")
+                if ts is None or not isinstance(g, dict):
+                    continue
+                diff = abs(float(ts) - float(time_scale))
+                if diff < best_diff:
+                    best_diff = diff
+                    best = g
+            if best:
+                try:
+                    return PIDGains(**best)
+                except Exception as e:
+                    print(f"[pid-db] failed to build gains from record: {e}")
+        # fallback: flat gains file
+        g = load_pid_gains(fallback_path)
+        return g if g is not None else DEFAULT_TUNED_GAINS
+
+    def _convert_line_search_points(self, line_search: dict) -> list[tuple[float, float, float]]:
+        coords = line_search.get("coordinateList") or []
+        pts: list[tuple[float, float, float]] = []
+        for c in coords:
+            lon = c.get("longitude")
+            lat = c.get("latitude")
+            alt = c.get("altitude", 0.0)
+            if lon is None or lat is None:
+                continue
+            try:
+                x, y = self.dem.lonlat_to_env(lon, lat)
+                z = self.dem.get_height(x, y) if alt == 0 else alt
+                pts.append((float(x), float(y), float(z)))
+            except Exception:
+                continue
+        return pts
+
+    def _build_line_search_segments(self, pts: list[tuple[float, float, float]]) -> list[tuple[tuple[float, float, float], tuple[float, float, float]]]:
+        """Build line segments from point list in pairs (p0,p1), ignoring lone tail."""
+        segs = []
+        for i in range(0, len(pts) - 1, 2):
+            p0 = pts[i]
+            p1 = pts[i + 1]
+            segs.append((p0, p1))
+        return segs
+
+    def _update_filming_target(self, idx: int, tgt: WaypointTarget | None, dt: float):
+        """Update filming target over time (supports mode 1/2/4)."""
+        uav = self.state.uavs[idx]
+        filming_prop = tgt.filming if tgt else None
+        current_wp_id = tgt.wp_id if tgt else None
+
+        if filming_prop is None:
+            self.uav_line_search_state[idx] = None
+            self.uav_filming_props[idx] = None
+            self.uav_filming_target[idx] = self._default_downward_target(uav)
+            return
+
+        mode = filming_prop.get("operationMode")
+        if mode == 4:
+            aircraft_fixed = filming_prop.get("aircraftFixed") or {}
+            pitch_deg = float(aircraft_fixed.get("gimbalPitch", 0.0))
+            yaw_offset_deg = float(aircraft_fixed.get("gimbalYaw", 0.0))
+            yaw_deg = uav.s.yaw + yaw_offset_deg
+            yaw_rad = math.radians(yaw_deg)
+            pitch_rad = math.radians(pitch_deg)
+            cp = math.cos(pitch_rad)
+            dir_vec = np.array(
+                [cp * math.cos(yaw_rad), -cp * math.sin(yaw_rad), math.sin(pitch_rad)],
+                dtype=float,
+            )
+            origin = np.array([uav.s.x, uav.s.y, uav.s.z], dtype=float)
+            hit = ray_intersect_dem(origin, dir_vec, self.dem)
+            if hit is not None:
+                self.uav_filming_target[idx] = tuple(hit.tolist())
+            else:
+                self.uav_filming_target[idx] = tuple((origin + dir_vec * 2000.0).tolist())
+            self.uav_line_search_state[idx] = None
+            return
+
+        if mode == 1:
+            coord_orient = filming_prop.get("coordinateOrientation") or {}
+            coord = coord_orient.get("coordinate") or {}
+            lon = coord.get("longitude")
+            lat = coord.get("latitude")
+            alt = coord.get("altitude", 0.0)
+            if lon is None or lat is None:
+                self.uav_filming_target[idx] = self._default_downward_target(uav)
+            else:
+                try:
+                    x, y = self.dem.lonlat_to_env(lon, lat)
+                    z = self.dem.get_height(x, y) if alt == 0 else alt
+                    self.uav_filming_target[idx] = (x, y, z)
+                except Exception:
+                    self.uav_filming_target[idx] = self._default_downward_target(uav)
+            self.uav_line_search_state[idx] = None
+            return
+
+        if mode == 2:
+            state = self.uav_line_search_state[idx]
+            line_search = filming_prop.get("lineSearch") or {}
+            if (
+                state is None
+                or state.get("wp_id") != current_wp_id
+                or state.get("filming_id") != id(filming_prop)
+            ):
+                pts = self._convert_line_search_points(line_search)
+                segs = self._build_line_search_segments(pts)
+                if not segs:
+                    self.uav_filming_target[idx] = self._default_downward_target(uav)
+                    self.uav_line_search_state[idx] = None
+                    self.uav_line_search_debug[idx] = None
+                    return
+                state = {
+                    "segments": segs,
+                    "seg_idx": 0,
+                    "seg_t": 0.0,
+                    "speed": float(line_search.get("searchSpeed", 0.0)),
+                    "wp_id": current_wp_id,
+                    "filming_id": id(filming_prop),
+                }
+                self.uav_line_search_debug[idx] = pts
+
+            segs = state["segments"]
+            seg_idx = state.get("seg_idx", 0)
+            seg_t = state.get("seg_t", 0.0)
+            speed = max(0.0, float(state.get("speed", 0.0)))
+            dist_left = speed * max(0.0, dt)
+
+            while dist_left > 0.0 and seg_idx < len(segs):
+                p0, p1 = segs[seg_idx]
+                seg_len = math.dist(p0, p1)
+                if seg_len < 1e-6:
+                    seg_idx += 1
+                    seg_t = 0.0
+                    continue
+                advance_t = dist_left / seg_len
+                new_t = seg_t + advance_t
+                if new_t >= 1.0:
+                    dist_left = (new_t - 1.0) * seg_len
+                    seg_idx += 1
+                    seg_t = 0.0
+                else:
+                    seg_t = new_t
+                    dist_left = 0.0
+
+            if seg_idx >= len(segs):
+                seg_idx = len(segs) - 1
+                seg_t = 1.0
+
+            p0, p1 = segs[seg_idx]
+            target = (
+                p0[0] + (p1[0] - p0[0]) * seg_t,
+                p0[1] + (p1[1] - p0[1]) * seg_t,
+                p0[2] + (p1[2] - p0[2]) * seg_t,
+            )
+            self.uav_filming_target[idx] = target
+            state["seg_idx"] = seg_idx
+            state["seg_t"] = seg_t
+            self.uav_line_search_state[idx] = state
+            return
+
+        # Other modes or unknown: default down
+        self.uav_line_search_state[idx] = None
+        self.uav_filming_target[idx] = self._default_downward_target(uav)
+
     def _update_targets_and_missiles(self, dt_sim):
         if self.state.targets_move:
             for t in self.state.targets:
@@ -760,6 +1006,7 @@ class SimulationApp:
         viewport = glGetIntegerv(GL_VIEWPORT)
         label_entries = []
         path_labels = []
+        mode_labels = {0: "없음", 1: "좌표 지향", 2: "구간탐색", 3: "자동추적", 4: "기체고정", 5: "자동주사"}
         for idx, snap in enumerate(snapshots):
             sx, sy, sz = gluProject(snap[0], snap[1], snap[2] + 10.0, model, proj, viewport)
             if 0.0 <= sz <= 1.0:
@@ -769,6 +1016,12 @@ class SimulationApp:
                 state_tag = "FALL" if self.state.crippled[idx] else ("CRASH" if self.state.crashed[idx] else "")
                 text = f"{name} {speed_text}" if not state_tag else f"{name} {speed_text} {state_tag}"
                 label_entries.append((sx, sy + 8, text, color))
+                wp_id = self.uav_current_wp_ids[idx] if idx < len(self.uav_current_wp_ids) else None
+                filming = self.uav_filming_props[idx] if idx < len(self.uav_filming_props) else None
+                mode = filming.get("operationMode") if isinstance(filming, dict) else None
+                mode_text = mode_labels.get(mode, "없음") if mode is not None else "없음"
+                sub_color = (255, 220, 180) if idx == self.state.active_idx else (180, 180, 180)
+                label_entries.append((sx, sy - 12, f"WP {wp_id if wp_id is not None else '-'} | 촬영 모드: {mode_text}", sub_color))
         # Flight path point labels (visible subset only)
         for info in getattr(self, "_flight_path_labels", []):
             px, py, pz = gluProject(info["pos"][0], info["pos"][1], info["pos"][2] + 5.0, model, proj, viewport)
@@ -783,28 +1036,56 @@ class SimulationApp:
 
         footprint_area = None
         los_clear = False
-        if nearest and (not is_lah):
-            uav_pos = np.array([active_snap[0], active_snap[1], active_snap[2]], dtype=float)
-            tgt_pos = np.array([nearest.x, nearest.y, nearest.z], dtype=float)
-            los_clear = check_los(uav_pos, tgt_pos, self.dem)
-            glLineWidth(2.0)
-            glEnable(GL_LINE_STIPPLE)
-            glLineStipple(1, 0x3333)
-            glColor3f(0.6, 0.6, 0.6)
-            glBegin(GL_LINES)
-            glVertex3f(*uav_pos)
-            glVertex3f(*tgt_pos)
-            glEnd()
-            glDisable(GL_LINE_STIPPLE)
-            with self.state.uav_locks[self.state.active_idx]:
-                footprint_area, footprint_corners = draw_camera_footprint(
-                    self.state.uavs[self.state.active_idx],
-                    (nearest.x, nearest.y, nearest.z),
-                    fov_diag_deg=self.state.fov_diag,
-                    dem=self.dem,
-                    aspect_ratio=16 / 9,
-                    z_scale=1.0,
+        if not is_lah:
+            filming_prop = None
+            if self.uav_filming_props and self.state.active_idx < len(self.uav_filming_props):
+                filming_prop = self.uav_filming_props[self.state.active_idx]
+            filming_target = None
+            if self.uav_filming_target and self.state.active_idx < len(self.uav_filming_target):
+                filming_target = self.uav_filming_target[self.state.active_idx]
+            if filming_target is None:
+                filming_target = self._compute_filming_target(self.state.active_idx, filming_prop)
+
+            tgt_pos = None
+            if filming_target is not None:
+                tgt_pos = np.array(filming_target, dtype=float)
+            elif nearest is not None:
+                tgt_pos = np.array([nearest.x, nearest.y, nearest.z], dtype=float)
+
+            # Draw line-search polyline debug (always, if exists).
+            if (
+                self.uav_line_search_debug
+                and self.state.active_idx < len(self.uav_line_search_debug)
+                and self.uav_line_search_debug[self.state.active_idx]
+            ):
+                draw_polyline(
+                    self.uav_line_search_debug[self.state.active_idx],
+                    color=(0.4, 1.0, 0.4),
+                    width=2.0,
+                    stipple=True,
                 )
+
+            if tgt_pos is not None:
+                uav_pos = np.array([active_snap[0], active_snap[1], active_snap[2]], dtype=float)
+                los_clear = check_los(uav_pos, tgt_pos, self.dem)
+                glLineWidth(2.0)
+                glEnable(GL_LINE_STIPPLE)
+                glLineStipple(1, 0x3333)
+                glColor3f(0.6, 0.6, 0.6)
+                glBegin(GL_LINES)
+                glVertex3f(*uav_pos)
+                glVertex3f(*tgt_pos)
+                glEnd()
+                glDisable(GL_LINE_STIPPLE)
+                with self.state.uav_locks[self.state.active_idx]:
+                    footprint_area, footprint_corners = draw_camera_footprint(
+                        self.state.uavs[self.state.active_idx],
+                        tgt_pos,
+                        fov_diag_deg=self.state.fov_diag,
+                        dem=self.dem,
+                        aspect_ratio=16 / 9,
+                        z_scale=1.0,
+                    )
 
         lines = [
             f"Active: {'LAH' if is_lah else 'UAV'}{self.state.active_idx + 1}  pos (m): x={active_snap[0]:7.1f}  y={active_snap[1]:7.1f}  z={active_snap[2]:6.1f}",
@@ -1044,16 +1325,17 @@ class SimulationApp:
         glVertex3f(0, map_half, 0)
         glEnd()
 
-        # Flight path points (mission WPs) for the active craft only
+        # Flight path points (mission WPs): show all, highlight active
         if getattr(self.state, "flight_paths", None):
-            idx = self.state.active_idx
-            if idx < len(self.state.flight_paths):
-                plist = self.state.flight_paths[idx]
-                # Draw thin dotted polyline
-                glColor3f(0.7, 0.7, 0.7)
+            active_idx = self.state.active_idx
+            for idx, plist in enumerate(self.state.flight_paths):
+                if not plist:
+                    continue
+                base_color = (1.0, 0.9, 0.2) if idx == active_idx else (0.7, 0.7, 0.7)
                 glLineWidth(1.0)
                 glEnable(GL_LINE_STIPPLE)
                 glLineStipple(1, 0x1111)
+                glColor3f(*base_color)
                 glBegin(GL_LINE_STRIP)
                 for wp in plist:
                     x, y, z = wp["pos"]
@@ -1062,8 +1344,8 @@ class SimulationApp:
                         glVertex3f(dx, dy, 0)
                 glEnd()
                 glDisable(GL_LINE_STIPPLE)
-                glColor3f(1.0, 0.9, 0.2)
-                glPointSize(4.0)
+                glPointSize(4.0 if idx == active_idx else 3.0)
+                glColor3f(*base_color)
                 glBegin(GL_POINTS)
                 for wp in plist:
                     x, y, z = wp["pos"]
@@ -1100,6 +1382,7 @@ class SimulationApp:
             mapping = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5}
             return mapping.get(prefix)
 
+        counts = [0 for _ in self.state.uavs]
         for fp in sorted(self.flight_path_root.glob("*.json")):
             try:
                 data = json.loads(fp.read_text(encoding="utf-8"))
@@ -1112,12 +1395,15 @@ class SimulationApp:
             idx = craft_idx_from_path_id(int(pid))
             if idx is None or idx >= len(paths_per_aircraft):
                 continue
-            wps = data.get("waypointList", [])
+            # Allow both waypointList (UAV) and lahWaypointList (LAH)
+            wps = data.get("waypointList", []) or data.get("lahWaypointList", [])
             for wp in wps:
                 coord = wp.get("coordinate") or {}
                 lon = coord.get("longitude")
                 lat = coord.get("latitude")
                 alt = coord.get("altitude", 0.0)
+                speed = wp.get("speed")
+                hover = (wp.get("hovering") or {}).get("time")
                 if lon is None or lat is None:
                     continue
                 try:
@@ -1127,9 +1413,143 @@ class SimulationApp:
                     print(f"[flight-path] coord out of DEM bounds for {fp}: {e}")
                     continue
                 paths_per_aircraft[idx].append(
-                    {"pos": (x, y, z), "wp_id": wp.get("waypointID"), "path_id": pid}
+                    {
+                        "pos": (x, y, z),
+                        "wp_id": wp.get("waypointID"),
+                        "path_id": pid,
+                        "speed": speed,
+                        "filming": wp.get("filmingProperty"),
+                        "hover_time": hover,
+                    }
                 )
+                counts[idx] += 1
         self.state.flight_paths = paths_per_aircraft
+        for idx, cnt in enumerate(counts):
+            if cnt > 0:
+                name = "LAH" if idx < 3 else "UAV"
+                print(f"[flight-path] loaded {cnt} waypoints for {name}{idx+1}")
+
+    def _init_uav_autopilots(self):
+        """Build PID waypoint followers for UAVs if flight paths are available."""
+        if not self.state:
+            return
+
+        self.uav_autopilots = [None for _ in self.state.uavs]
+        self.uav_filming_props = [None for _ in self.state.uavs]
+        self.uav_current_wp_ids = [None for _ in self.state.uavs]
+        self.uav_line_search_state = [None for _ in self.state.uavs]
+        self.uav_filming_target = [None for _ in self.state.uavs]
+        self.uav_line_search_debug = [None for _ in self.state.uavs]
+        if not (self.enable_uav_autopilot and self.enable_flight_paths):
+            return
+        if not getattr(self.state, "flight_paths", None):
+            return
+
+        time_scale = self.state.time_scale["value"] if self.state else 1.0
+        for idx, plist in enumerate(self.state.flight_paths):
+            if not plist:
+                continue
+            targets: list[WaypointTarget] = []
+            for wp in plist:
+                pos = None
+                speed = None
+                filming = None
+                wp_id = None
+                hover_time = None
+                if isinstance(wp, dict):
+                    pos = wp.get("pos")
+                    speed = wp.get("speed")
+                    filming = wp.get("filming")
+                    wp_id = wp.get("wp_id")
+                    hover_time = wp.get("hover_time")
+                elif isinstance(wp, (list, tuple)) and len(wp) == 3:
+                    pos = wp
+                if pos is None:
+                    continue
+                try:
+                    px, py, pz = pos
+                except Exception:
+                    continue
+                targets.append(
+                    WaypointTarget(
+                        pos=(float(px), float(py), float(pz)),
+                        speed=speed,
+                        filming=filming,
+                        wp_id=int(wp_id) if wp_id is not None else None,
+                        hover_time=float(hover_time) if hover_time is not None else None,
+                    )
+                )
+
+            if targets:
+                is_uav = self.state.uav_types[idx] == "UAV"
+                gains_path = self.pid_db_path_uav if is_uav else self.pid_db_path_lah
+                fallback_path = self.pid_gains_path if is_uav else self.pid_gains_path_lah
+                gains = self._pick_gains_for_scale(gains_path, fallback_path, time_scale)
+                self.uav_autopilots[idx] = WaypointPIDController(
+                    self.state.uavs[idx],
+                    targets,
+                    gains=gains,
+                    speed_target=90.0 if is_uav else 60.0,
+                    pos_tol=30.0,
+                    name=("UAV" if is_uav else "LAH") + f"{idx + 1}",
+                    allow_hover=not is_uav,
+                )
+                self.uav_filming_props[idx] = targets[0].filming if targets[0].filming else None
+                self.uav_current_wp_ids[idx] = int(targets[0].wp_id) if targets[0].wp_id is not None else None
+                print(f"[pid-autopilot] armed for {('UAV' if is_uav else 'LAH')}{idx + 1} with {len(targets)} waypoints.")
+
+    def _update_autopilots(self, dt_sim: float):
+        """
+        Advance UAV PID autopilots over the current simulation dt by sub-stepping
+        with a fixed control step (self.sim_step) so high time_scale does not
+        explode the controller.
+        """
+        if not self.state or not self.uav_autopilots or not self.enable_uav_autopilot:
+            return
+        time_scale = self.state.time_scale["value"] if self.state else 1.0
+        ctrl_step = float(self.sim_step)
+        for idx, ap in enumerate(self.uav_autopilots):
+            if ap is None or self.state.crashed[idx]:
+                continue
+            is_uav = self.state.uav_types[idx] == "UAV"
+            gains_path = self.pid_db_path_uav if is_uav else self.pid_db_path_lah
+            fallback_path = self.pid_gains_path if is_uav else self.pid_gains_path_lah
+            ap.gains = self._pick_gains_for_scale(gains_path, fallback_path, time_scale)
+            pending = self.state.pending_states[idx]
+            if pending:
+                # Use buffered state samples (arrive at sim_step spacing) to keep control in sync.
+                for state_tuple in pending:
+                    (
+                        self.state.uavs[idx].s.x,
+                        self.state.uavs[idx].s.y,
+                        self.state.uavs[idx].s.z,
+                        self.state.uavs[idx].s.roll,
+                        self.state.uavs[idx].s.pitch,
+                        self.state.uavs[idx].s.yaw,
+                        self.state.uavs[idx].s.u,
+                        self.state.uavs[idx].s.p,
+                        self.state.uavs[idx].s.q,
+                        self.state.uavs[idx].s.r,
+                    ) = state_tuple
+                    ap.update(ctrl_step, dem=self.dem)
+                    self._update_filming_target(idx, ap.current_target(), ctrl_step)
+            else:
+                # Fallback: advance over the reported dt_sim in fixed steps.
+                remaining = max(0.0, float(dt_sim))
+                while remaining > 0.0:
+                    step = ctrl_step if remaining >= ctrl_step else remaining
+                    ap.update(step, dem=self.dem)
+                    self._update_filming_target(idx, ap.current_target(), step)
+                    remaining -= step
+
+            # Track current filming property for this UAV (current target of autopilot).
+            tgt = ap.current_target()
+            self.uav_filming_props[idx] = tgt.filming if tgt else None
+            self.uav_current_wp_ids[idx] = int(tgt.wp_id) if (tgt and tgt.wp_id is not None) else None
+            if tgt and tgt.filming:
+                fov = tgt.filming.get("fieldOfView")
+                if isinstance(fov, (int, float)):
+                    self.state.fov_diag = float(fov)
 
     def _sample_cpu(self):
         if psutil is None:
