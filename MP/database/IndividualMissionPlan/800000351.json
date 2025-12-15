@@ -1,0 +1,156 @@
+{
+  "timestamp": 819039027572,
+  "individualMissionPackageID": 800000351,
+  "aircraftID": 6,
+  "individualMissionList": [
+    {
+      "individualMissionID": 900002553,
+      "isDone": false,
+      "relatedMission": {
+        "relatedMissionType": 1,
+        "inputMissionID": 1,
+        "priorMissionID": 0
+      },
+      "individualMissionInfo": {
+        "individualMissionType": 6,
+        "patternType": 4,
+        "autoZoomIn": true,
+        "lineList": [
+          {
+            "width": 500.0,
+            "coordinateList": [
+              {
+                "latitude": 38.05184132914657,
+                "longitude": 127.3974031127273,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.05559834682814,
+                "longitude": 127.38182141473142,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.06207501954442,
+                "longitude": 127.37250881557841,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.06495774561105,
+                "longitude": 127.35936838012994,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.0752599410002,
+                "longitude": 127.34507587335074,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.08827676988698,
+                "longitude": 127.33610548347708,
+                "altitude": 0
+              }
+            ]
+          }
+        ],
+        "targetID": null
+      },
+      "pathID": 600000234
+    },
+    {
+      "individualMissionID": 900002555,
+      "isDone": false,
+      "relatedMission": {
+        "relatedMissionType": 1,
+        "inputMissionID": 2,
+        "priorMissionID": 0
+      },
+      "individualMissionInfo": {
+        "individualMissionType": 3,
+        "patternType": 4,
+        "autoZoomIn": true,
+        "areaList": [
+          {
+            "isHole": false,
+            "coordinateList": [
+              {
+                "latitude": 38.10678700898594,
+                "longitude": 127.32719439066055,
+                "altitude": 0.0
+              },
+              {
+                "latitude": 38.10678700898594,
+                "longitude": 127.33265597896353,
+                "altitude": 0.0
+              },
+              {
+                "latitude": 38.093879736706135,
+                "longitude": 127.33073938573263,
+                "altitude": 0.0
+              },
+              {
+                "latitude": 38.093879736706135,
+                "longitude": 127.32527779742965,
+                "altitude": 0.0
+              }
+            ]
+          }
+        ],
+        "targetID": null
+      },
+      "pathID": 600000235
+    },
+    {
+      "individualMissionID": 900002557,
+      "isDone": false,
+      "relatedMission": {
+        "relatedMissionType": 1,
+        "inputMissionID": 3,
+        "priorMissionID": 0
+      },
+      "individualMissionInfo": {
+        "individualMissionType": 6,
+        "patternType": 4,
+        "autoZoomIn": true,
+        "lineList": [
+          {
+            "width": 400.0,
+            "coordinateList": [
+              {
+                "latitude": 38.116377602118575,
+                "longitude": 127.3217549024774,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.131973773119746,
+                "longitude": 127.31412356087338,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.142348681304725,
+                "longitude": 127.31515383480613,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.15700221535668,
+                "longitude": 127.32073744288822,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.16662019760197,
+                "longitude": 127.32395691151022,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.18269140566263,
+                "longitude": 127.31998883173856,
+                "altitude": 0
+              }
+            ]
+          }
+        ],
+        "targetID": null
+      },
+      "pathID": 600000236
+    }
+  ]
+}

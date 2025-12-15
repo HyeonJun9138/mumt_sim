@@ -1,0 +1,92 @@
+{
+  "timestamp": 819108582660,
+  "inputMissionPackageID": 1,
+  "missionReferencePackageID": 1,
+  "targetList": [
+    {
+      "targetID": 1,
+      "targetType": 1,
+      "inputMissionID": 1,
+      "location": {
+        "latitude": 38.19238105557861,
+        "longitude": 127.37235567089873,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.19238105557861,
+          "longitude": 127.37235567089873,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 2,
+      "targetType": 2,
+      "inputMissionID": 1,
+      "location": {
+        "latitude": 38.20863480737377,
+        "longitude": 127.35057252568961,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.20863480737377,
+          "longitude": 127.35057252568961,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 3,
+      "targetType": 2,
+      "inputMissionID": 2,
+      "location": {
+        "latitude": 38.178345854951594,
+        "longitude": 127.37787843459604,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.178345854951594,
+          "longitude": 127.37787843459604,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 4,
+      "targetType": 1,
+      "inputMissionID": 3,
+      "location": {
+        "latitude": 38.143521467534896,
+        "longitude": 127.3924743865774,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.143521467534896,
+          "longitude": 127.3924743865774,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 5,
+      "targetType": 2,
+      "inputMissionID": 3,
+      "location": {
+        "latitude": 38.128996222672384,
+        "longitude": 127.40628796510464,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.128996222672384,
+          "longitude": 127.40628796510464,
+          "altitude": 0
+        }
+      ]
+    }
+  ]
+}

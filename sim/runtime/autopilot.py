@@ -13,6 +13,9 @@ class Waypoint:
     y: float
     z: float
     name: str
+    line_search: list[tuple[float, float, float]] | None = None
+    search_speed: float | None = None
+    speed: float | None = None
 
 
 @dataclass
@@ -80,7 +83,7 @@ def _advance_if_reached(mission: Mission, uav_pos, dta: float, xy_tol: float = 2
     dz = wp.z - uav_pos[2]
     horiz = math.hypot(dx, dy)
     # Allow larger pass-by window based on DTA (start next leg early)
-    passby = max(xy_tol, min(120.0, dta * 0.3))
+    passby = max(xy_tol, min(150.0, dta * 0.6))
     if horiz <= passby and abs(dz) <= z_tol:
         mission.current_idx += 1
         if mission.current_idx >= len(mission.waypoints):
@@ -106,7 +109,8 @@ def _command_autopilot(uav, target_wp: Waypoint, is_lah: bool):
     )
 
     # Simple speed hold
-    target_speed = 40.0 if is_lah else 90.0
+    wp_speed = getattr(target_wp, "speed", None)
+    target_speed = float(wp_speed) if wp_speed is not None else (40.0 if is_lah else 90.0)
     speed_err = target_speed - uav.s.u
     throttle_k = 1.0 / max(uav.p.accel, 1e-3)
     uav.cmd_throttle = clamp(speed_err * throttle_k, -1.0, 1.0)
@@ -141,4 +145,9 @@ def update_autopilot(state, dem: DEM, dt: float):
 
         with state.uav_locks[idx]:
             _command_autopilot(uav, active_target, is_lah=state.uav_types[idx] == "LAH")
-            _advance_if_reached(mission, (uav.s.x, uav.s.y, uav.s.z), dta=dta)
+            scan_active = False
+            if hasattr(state, "line_scan_states") and state.line_scan_states:
+                s = state.line_scan_states[idx] if idx < len(state.line_scan_states) else None
+                scan_active = s is not None and not getattr(s, "finished", False)
+            if not scan_active:
+                _advance_if_reached(mission, (uav.s.x, uav.s.y, uav.s.z), dta=dta)

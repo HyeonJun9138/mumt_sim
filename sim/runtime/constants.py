@@ -1,6 +1,10 @@
 from sim.config import REPO_ROOT
 from sim.entities.threat import AirDefenseThreat, RadarParams, WeaponParams, WeaponType
 
+# Global toggle to disable any threat lethality (no damage/cripple).
+# Can be toggled at runtime via keyboard (see app.py).
+THREAT_KILL_DISABLED = True
+
 # (x, y) in meters; edit this list to pre-place multiple targets
 TARGET_SPAWNS = [
     (-200.0, -150.0),
@@ -9,14 +13,14 @@ TARGET_SPAWNS = [
 TARGET_ROAM_RADIUS_M = 250.0  # each target roams within ~500m diameter around its spawn
 TARGET_SPEED_RANGE = (2.0, 7.0)  # m/s
 
-# Threat defaults (moderate)
+# Threat defaults (fully disabled; attacks off by default)
 THREAT_RADAR = RadarParams()  # P_fa=1e-6, n=1.5, t_ref=5s ...
 THREAT_WEAPON = WeaponParams(
-    weapon_type=WeaponType.MISSILE,
-    a_range=3500.0,
-    b_slope=2.0,
-    omega=0.8,
-    t_fire=3.0,
+    weapon_type=WeaponType.GUN,
+    a_range=0.0,   # no range -> no engagement
+    b_slope=3.0,
+    omega=0.0,     # no lethality
+    t_fire=4.0,
 )
 THREAT_DEFAULT = AirDefenseThreat(radar=THREAT_RADAR, weapon=THREAT_WEAPON)
 

@@ -1,0 +1,295 @@
+{
+  "timestamp": 819081435013,
+  "Source": "MMR",
+  "pathID": 400000251,
+  "aircraftID": 4,
+  "isFormationFlight": false,
+  "waypointList": [
+    {
+      "waypointID": 729,
+      "coordinate": {
+        "latitude": 38.10407,
+        "longitude": 127.235516,
+        "altitude": 800
+      },
+      "speed": 40.0,
+      "eta": 0,
+      "ecf": 0.0,
+      "nextWaypointID": 730,
+      "waypointPassType": 1,
+      "filmingProperty": {
+        "fieldOfView": 10.0,
+        "sensorType": 1,
+        "operationMode": 4,
+        "aircraftFixed": {
+          "gimbalPitch": -90.0,
+          "gimbalYaw": 0.0
+        }
+      }
+    },
+    {
+      "waypointID": 730,
+      "coordinate": {
+        "latitude": 38.09060307127549,
+        "longitude": 127.23491969262915,
+        "altitude": 800
+      },
+      "speed": 40.0,
+      "eta": 37,
+      "ecf": 0.16,
+      "nextWaypointID": 731,
+      "waypointPassType": 1,
+      "filmingProperty": {
+        "fieldOfView": 15,
+        "sensorType": 1,
+        "operationMode": 1,
+        "coordinateOrientation": {
+          "coordinate": {
+            "latitude": 38.076998426318966,
+            "longitude": 127.23377361149582,
+            "altitude": 0
+          }
+        }
+      }
+    },
+    {
+      "waypointID": 731,
+      "coordinate": {
+        "latitude": 38.07683071047332,
+        "longitude": 127.23422376620519,
+        "altitude": 800
+      },
+      "speed": 40.0,
+      "eta": 39,
+      "ecf": 0.34,
+      "nextWaypointID": 732,
+      "waypointPassType": 1,
+      "filmingProperty": {
+        "fieldOfView": 15,
+        "sensorType": 1,
+        "operationMode": 2,
+        "lineSearch": {
+          "coordinateList": [
+            {
+              "latitude": 38.076998426318966,
+              "longitude": 127.23377361149582,
+              "altitude": 245
+            },
+            {
+              "latitude": 38.077355,
+              "longitude": 127.231539,
+              "altitude": 251
+            },
+            {
+              "latitude": 38.077710943312404,
+              "longitude": 127.22930421091019,
+              "altitude": 257
+            },
+            {
+              "latitude": 38.07440429844328,
+              "longitude": 127.22846068924719,
+              "altitude": 159
+            },
+            {
+              "latitude": 38.073973,
+              "longitude": 127.230676,
+              "altitude": 175
+            },
+            {
+              "latitude": 38.07354185335018,
+              "longitude": 127.23289163328556,
+              "altitude": 191
+            },
+            {
+              "latitude": 38.0700847296116,
+              "longitude": 127.23200959314106,
+              "altitude": 139
+            },
+            {
+              "latitude": 38.070591,
+              "longitude": 127.229814,
+              "altitude": 139
+            },
+            {
+              "latitude": 38.07109819186786,
+              "longitude": 127.22761737676517,
+              "altitude": 139
+            },
+            {
+              "latitude": 38.06779262953881,
+              "longitude": 127.22677427492839,
+              "altitude": 181
+            },
+            {
+              "latitude": 38.06721,
+              "longitude": 127.228951,
+              "altitude": 187
+            },
+            {
+              "latitude": 38.06662704915516,
+              "longitude": 127.23112748956095,
+              "altitude": 193
+            },
+            {
+              "latitude": 38.063168805945814,
+              "longitude": 127.23024532102217,
+              "altitude": 266
+            },
+            {
+              "latitude": 38.063828,
+              "longitude": 127.228088,
+              "altitude": 268
+            },
+            {
+              "latitude": 38.06448761749587,
+              "longitude": 127.22593138522275,
+              "altitude": 269
+            },
+            {
+              "latitude": 38.063828,
+              "longitude": 127.228088,
+              "altitude": 268
+            },
+            {
+              "latitude": 38.063168805945814,
+              "longitude": 127.23024532102217,
+              "altitude": 266
+            }
+          ],
+          "searchSpeed": 61.14,
+          "interpolationPoints": 3
+        }
+      }
+    },
+    {
+      "waypointID": 732,
+      "coordinate": {
+        "latitude": 38.063965949845645,
+        "longitude": 127.22798696174581,
+        "altitude": 800
+      },
+      "speed": 40.0,
+      "eta": 69,
+      "ecf": 0.64,
+      "nextWaypointID": 733,
+      "waypointPassType": 1,
+      "filmingProperty": {
+        "fieldOfView": 15,
+        "sensorType": 1,
+        "operationMode": 2,
+        "lineSearch": {
+          "coordinateList": [
+            {
+              "latitude": 38.060659361565236,
+              "longitude": 127.22834721001655,
+              "altitude": 324
+            },
+            {
+              "latitude": 38.061372,
+              "longitude": 127.226231,
+              "altitude": 282
+            },
+            {
+              "latitude": 38.06208553210358,
+              "longitude": 127.2241146369728,
+              "altitude": 241
+            },
+            {
+              "latitude": 38.05968310824981,
+              "longitude": 127.22229776935404,
+              "altitude": 236
+            },
+            {
+              "latitude": 38.058917,
+              "longitude": 127.224374,
+              "altitude": 252
+            },
+            {
+              "latitude": 38.058150201056804,
+              "longitude": 127.22644946279354,
+              "altitude": 267
+            },
+            {
+              "latitude": 38.05564132172254,
+              "longitude": 127.22455207722948,
+              "altitude": 200
+            },
+            {
+              "latitude": 38.056461,
+              "longitude": 127.222516,
+              "altitude": 186
+            },
+            {
+              "latitude": 38.05728034864869,
+              "longitude": 127.2204807844479,
+              "altitude": 172
+            },
+            {
+              "latitude": 38.054877255983044,
+              "longitude": 127.21866368431157,
+              "altitude": 172
+            },
+            {
+              "latitude": 38.054005,
+              "longitude": 127.220659,
+              "altitude": 187
+            },
+            {
+              "latitude": 38.05313272089575,
+              "longitude": 127.22265505122519,
+              "altitude": 202
+            },
+            {
+              "latitude": 38.05062439594055,
+              "longitude": 127.22075838270545,
+              "altitude": 169
+            },
+            {
+              "latitude": 38.051549,
+              "longitude": 127.218802,
+              "altitude": 161
+            },
+            {
+              "latitude": 38.05247383290484,
+              "longitude": 127.21684647097818,
+              "altitude": 153
+            }
+          ],
+          "searchSpeed": 60.96,
+          "interpolationPoints": 3
+        }
+      }
+    },
+    {
+      "waypointID": 733,
+      "coordinate": {
+        "latitude": 38.06148134545493,
+        "longitude": 127.22664056991361,
+        "altitude": 800
+      },
+      "speed": 40.0,
+      "eta": 81,
+      "ecf": 1.0,
+      "nextWaypointID": 0,
+      "waypointPassType": 2,
+      "filmingProperty": {
+        "fieldOfView": 66.638654,
+        "sensorType": 1,
+        "operationMode": 1,
+        "coordinateOrientation": {
+          "coordinate": {
+            "latitude": 38.06148134545493,
+            "longitude": 127.22664056991361,
+            "altitude": 0
+          }
+        }
+      },
+      "loiterProperty": {
+        "radius": 800,
+        "direction": 1,
+        "time": 30,
+        "speed": 30
+      }
+    }
+  ]
+}

@@ -71,6 +71,10 @@ class AirDefenseThreat:
         if not self.state.detected:
             return 0.0
 
+        # If lethality or range is disabled, skip entirely.
+        if self.weapon is None or self.weapon.omega <= 0.0 or self.weapon.a_range <= 0.0:
+            return 0.0
+
         if self.weapon.weapon_type is WeaponType.MISSILE:
             if self.state.t_exposed < self.weapon.t_fire:
                 return 0.0

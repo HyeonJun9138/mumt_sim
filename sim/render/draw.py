@@ -80,6 +80,19 @@ _dem_cache = {"center": None, "radius": None, "row_min": 0, "row_max": 0, "col_m
 _dem_clamp_logged = False
 _dem_step_cap_logged = False
 
+
+def draw_rejoin_points(points, color=(0.9, 0.2, 0.2)):
+    """Draw small markers for rejoin helper points."""
+    if not points:
+        return
+    glPointSize(8.0)
+    glColor3f(*color)
+    glBegin(GL_POINTS)
+    for p in points:
+        glVertex3f(p[0], p[1], p[2])
+    glEnd()
+    glPointSize(1.0)
+
 def draw_axes(length=50.0, width=2.0):
     glLineWidth(width)
     glBegin(GL_LINES)
@@ -335,7 +348,14 @@ def draw_dem(
 
 
 def draw_camera_footprint(
-    uav, target, fov_diag_deg, dem: DEM, aspect_ratio=16 / 9, color=(0.1, 0.6, 1.0), z_scale=1.0
+    uav,
+    target,
+    fov_diag_deg,
+    dem: DEM,
+    aspect_ratio=16 / 9,
+    color=(0.1, 0.6, 1.0),
+    z_scale=1.0,
+    draw: bool = True,
 ):
     uav_pos = np.array([uav.s.x, uav.s.y, uav.s.z], dtype=float)
     tgt_pos = np.array(target, dtype=float)
@@ -368,31 +388,34 @@ def draw_camera_footprint(
         if hit is not None:
             corners.append(hit)
 
-    glColor3f(1, 1, 0)
-    glLineWidth(2.0)
-    glEnable(GL_LINE_STIPPLE)
-    glLineStipple(1, 0x0C0C)
-    glBegin(GL_LINES)
-    glVertex3f(*uav_pos)
-    glVertex3f(*tgt_pos)
-    glEnd()
-    glDisable(GL_LINE_STIPPLE)
+    if draw:
+        glColor3f(1, 1, 0)
+        glLineWidth(2.0)
+        glEnable(GL_LINE_STIPPLE)
+        glLineStipple(1, 0x0C0C)
+        glBegin(GL_LINES)
+        glVertex3f(*uav_pos)
+        glVertex3f(*tgt_pos)
+        glEnd()
+        glDisable(GL_LINE_STIPPLE)
 
     area = None
+    corners_sorted = None
     if len(corners) == 4:
         cx = np.mean([c[0] for c in corners])
         cy = np.mean([c[1] for c in corners])
         corners_sorted = sorted(corners, key=lambda c: math.atan2(c[1] - cy, c[0] - cx))
-        glColor3f(*color)
-        glLineWidth(2.0)
-        glBegin(GL_LINE_LOOP)
-        for c in corners_sorted:
-            glVertex3f(c[0], c[1], c[2] * z_scale)
-        glEnd()
+        if draw:
+            glColor3f(*color)
+            glLineWidth(2.0)
+            glBegin(GL_LINE_LOOP)
+            for c in corners_sorted:
+                glVertex3f(c[0], c[1], c[2] * z_scale)
+            glEnd()
         x = [c[0] for c in corners_sorted]
         y = [c[1] for c in corners_sorted]
         area = 0.5 * abs(sum(x[i] * y[(i + 1) % 4] - x[(i + 1) % 4] * y[i] for i in range(4)))
-    return area
+    return area, corners_sorted
 
 
 def _init_font():
