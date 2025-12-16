@@ -1,5 +1,6 @@
-from dataclasses import dataclass, field
 import threading
+import multiprocessing
+from dataclasses import dataclass, field
 from typing import List, Tuple
 
 from sim.agent_status import MAX_FUEL_L
@@ -30,39 +31,22 @@ class SimulationState:
     crashed: List[bool]
     crippled: List[bool]
     fuel_levels: List[float]
-    run_event: threading.Event
+    run_event: multiprocessing.Event
     time_scale: dict
     time_lock: threading.Lock
-    workers: List[threading.Thread]
+    workers: List
+    proc_cmd_queues: List
+    proc_state_queues: List
+    proc_stop_events: List
+    pending_states: List[list]
+    flight_paths: List[list]
     active_idx: int = 0
     fov_diag: float = DEFAULT_FOV_DIAG
     fog_enabled: bool = True
     targets_move: bool = True
     latest_agent_status_0401: dict | None = None
     initial_spawn_points: List[Tuple[float, float, float]] = field(default_factory=list)
-    missions: list = field(default_factory=list)
-    autopilot_enabled: bool = False
-    standoff_controller: object | None = None
-    standoff_gimbal_target: Tuple[float, float, float] | None = None
-    standoff_uav_idx: int | None = None
-    tracking_controller: object | None = None
-    tracking_target_idx: int | None = None
-    tracking_active: bool = False
-    tracking_resume_timer: float = 0.0
-    tracking_cooldown: float = 0.0
-    standoff_paused: bool = False
-    standoff_resume_index: int = 0
-    standoff_resume_scan_t: float = 0.0
-    lah_qrf_idx: int | None = None
-    lah_qrf_origin: Tuple[float, float, float] | None = None
-    lah_qrf_active: bool = False
-    lah_qrf_rtb: bool = False
-    lah_qrf_timer: float = 0.0
-    lah_qrf_target_idx: int | None = None
-    lah_qrf_controller: object | None = None
     threat_kill_disabled: bool = True
-    gimbal_targets: list = field(default_factory=list)
-    line_scan_states: list = field(default_factory=list)
 
 
 def build_initial_state():
@@ -106,7 +90,7 @@ def build_initial_state():
     crippled = [False for _ in uavs]
     fuel_levels = [MAX_FUEL_L for _ in uav_types]
 
-    run_event = threading.Event()
+    run_event = multiprocessing.Event()
     run_event.set()
     time_scale = {"value": 1.0}
     time_lock = threading.Lock()
@@ -125,28 +109,11 @@ def build_initial_state():
         time_scale=time_scale,
         time_lock=time_lock,
         workers=[],
+        proc_cmd_queues=[],
+        proc_state_queues=[],
+        proc_stop_events=[],
+        pending_states=[[] for _ in uavs],
+        flight_paths=[[] for _ in uavs],
         initial_spawn_points=[(u.s.x, u.s.y, u.s.z) for u in uavs],
-        missions=[],
-        autopilot_enabled=False,
-        standoff_controller=None,
-        standoff_gimbal_target=None,
-        standoff_uav_idx=None,
-        tracking_controller=None,
-        tracking_target_idx=None,
-        tracking_active=False,
-        tracking_resume_timer=0.0,
-        tracking_cooldown=0.0,
-        standoff_paused=False,
-        standoff_resume_index=0,
-        standoff_resume_scan_t=0.0,
-        lah_qrf_idx=None,
-        lah_qrf_origin=None,
-        lah_qrf_active=False,
-        lah_qrf_rtb=False,
-        lah_qrf_timer=0.0,
-        lah_qrf_target_idx=None,
-        lah_qrf_controller=None,
         threat_kill_disabled=THREAT_KILL_DISABLED,
-        gimbal_targets=[None for _ in uavs],
-        line_scan_states=[None for _ in uavs],
     )

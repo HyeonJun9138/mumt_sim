@@ -97,6 +97,26 @@ def _load_targets(target_path: Path, dem: DEM) -> List[MovingTarget]:
     return targets
 
 
+def load_targets_from_db(db_root: Path, dem: DEM, target_path: Path | None = None) -> List[MovingTarget]:
+    """
+    Load targets from the latest TargetInfo JSON under db_root.
+    Returns an empty list when none are found or parsing fails.
+    """
+    try:
+        db_root = db_root.expanduser().resolve()
+    except Exception:
+        return []
+    tgt_dir = db_root / "TargetInfo"
+    tgt_file = target_path or _latest_json(tgt_dir)
+    if tgt_file is None:
+        return []
+    try:
+        return _load_targets(tgt_file, dem)
+    except Exception as e:
+        print(f"[scenario] failed to load targets from {tgt_file}: {e}")
+        return []
+
+
 def load_scenario(db_root: Path, dem: DEM) -> ScenarioData | None:
     """
     Load a scenario from the database folder.
@@ -116,7 +136,7 @@ def load_scenario(db_root: Path, dem: DEM) -> ScenarioData | None:
 
     uav_positions = _load_uav_positions(mref, dem)
     lah_positions = _build_lah_positions(uav_positions)
-    targets = _load_targets(tgt, dem)
+    targets = load_targets_from_db(db_root, dem, target_path=tgt)
     return ScenarioData(uav_positions=uav_positions, lah_positions=lah_positions, targets=targets)
 
 

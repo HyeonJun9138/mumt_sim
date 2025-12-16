@@ -1,0 +1,608 @@
+{
+  "timestamp": 819181552561,
+  "Source": "MMR",
+  "pathID": 200000430,
+  "aircraftID": 2,
+  "lahWaypointList": [
+    {
+      "waypointID": 146,
+      "coordinate": {
+        "latitude": 38.098676,
+        "longitude": 127.397409,
+        "altitude": 1000
+      },
+      "speed": 10,
+      "eta": 0,
+      "ecf": 0.0,
+      "nextWaypointID": 147,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 147,
+      "coordinate": {
+        "latitude": 38.126816,
+        "longitude": 127.404383,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 79557,
+      "ecf": 0.37,
+      "nextWaypointID": 148,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 148,
+      "coordinate": {
+        "latitude": 38.133797,
+        "longitude": 127.403056,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 99141,
+      "ecf": 0.47,
+      "nextWaypointID": 149,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 149,
+      "coordinate": {
+        "latitude": 38.148926,
+        "longitude": 127.394012,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 145561,
+      "ecf": 0.68,
+      "nextWaypointID": 150,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 150,
+      "coordinate": {
+        "latitude": 38.149637,
+        "longitude": 127.394141,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 147554,
+      "ecf": 0.69,
+      "nextWaypointID": 151,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 151,
+      "coordinate": {
+        "latitude": 38.150291,
+        "longitude": 127.394517,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 149547,
+      "ecf": 0.7,
+      "nextWaypointID": 152,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 152,
+      "coordinate": {
+        "latitude": 38.150837,
+        "longitude": 127.395109,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 151540,
+      "ecf": 0.71,
+      "nextWaypointID": 153,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 153,
+      "coordinate": {
+        "latitude": 38.15123,
+        "longitude": 127.395871,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 153533,
+      "ecf": 0.72,
+      "nextWaypointID": 154,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 154,
+      "coordinate": {
+        "latitude": 38.151439,
+        "longitude": 127.396742,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 155526,
+      "ecf": 0.73,
+      "nextWaypointID": 155,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 155,
+      "coordinate": {
+        "latitude": 38.151448,
+        "longitude": 127.397651,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 157519,
+      "ecf": 0.74,
+      "nextWaypointID": 156,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 156,
+      "coordinate": {
+        "latitude": 38.151256,
+        "longitude": 127.398528,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 159512,
+      "ecf": 0.75,
+      "nextWaypointID": 157,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 157,
+      "coordinate": {
+        "latitude": 38.150877,
+        "longitude": 127.399302,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 161505,
+      "ecf": 0.76,
+      "nextWaypointID": 158,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 158,
+      "coordinate": {
+        "latitude": 38.150344,
+        "longitude": 127.399911,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 163498,
+      "ecf": 0.77,
+      "nextWaypointID": 159,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 159,
+      "coordinate": {
+        "latitude": 38.149697,
+        "longitude": 127.400307,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 165491,
+      "ecf": 0.78,
+      "nextWaypointID": 160,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 160,
+      "coordinate": {
+        "latitude": 38.148988,
+        "longitude": 127.400458,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 167484,
+      "ecf": 0.79,
+      "nextWaypointID": 161,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 161,
+      "coordinate": {
+        "latitude": 38.148275,
+        "longitude": 127.400353,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 169477,
+      "ecf": 0.8,
+      "nextWaypointID": 162,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 162,
+      "coordinate": {
+        "latitude": 38.147613,
+        "longitude": 127.399999,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 171470,
+      "ecf": 0.81,
+      "nextWaypointID": 163,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 163,
+      "coordinate": {
+        "latitude": 38.147055,
+        "longitude": 127.399425,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 173463,
+      "ecf": 0.82,
+      "nextWaypointID": 164,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 164,
+      "coordinate": {
+        "latitude": 38.146647,
+        "longitude": 127.398677,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 175456,
+      "ecf": 0.83,
+      "nextWaypointID": 165,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 165,
+      "coordinate": {
+        "latitude": 38.146419,
+        "longitude": 127.397814,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 177449,
+      "ecf": 0.83,
+      "nextWaypointID": 166,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 166,
+      "coordinate": {
+        "latitude": 38.146391,
+        "longitude": 127.396905,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 179442,
+      "ecf": 0.84,
+      "nextWaypointID": 167,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 167,
+      "coordinate": {
+        "latitude": 38.146565,
+        "longitude": 127.396022,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 181435,
+      "ecf": 0.85,
+      "nextWaypointID": 168,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 168,
+      "coordinate": {
+        "latitude": 38.146926,
+        "longitude": 127.395235,
+        "altitude": 1000
+      },
+      "speed": 40.0,
+      "eta": 183429,
+      "ecf": 0.86,
+      "nextWaypointID": 169,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    },
+    {
+      "waypointID": 169,
+      "coordinate": {
+        "latitude": 38.154412,
+        "longitude": 127.385894,
+        "altitude": 1000
+      },
+      "speed": 10,
+      "eta": 212589,
+      "ecf": 1.0,
+      "nextWaypointID": 0,
+      "hovering": {
+        "time": 10
+      },
+      "loiter": {
+        "radius": 0,
+        "direction": 0,
+        "time": 0,
+        "speed": 0
+      },
+      "attack": {
+        "targetID": 0,
+        "weaponType": 0
+      }
+    }
+  ]
+}

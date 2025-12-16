@@ -7,7 +7,7 @@ import sys
 import time
 
 
-INSTANCE_COUNT = 3
+INSTANCE_COUNT = 6
 TARGET_SCRIPT = "main.py"
 
 

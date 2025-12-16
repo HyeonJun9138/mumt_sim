@@ -1,0 +1,35 @@
+{
+  "missionPlanID": 700000001,
+  "timestamp": 819181767487,
+  "missionPlanTimestamp": 819181767487,
+  "planningTime": 11.438846588134766,
+  "plannerID": 1,
+  "inputMissionPackageID": 1,
+  "missionReferencePackageID": 1,
+  "aircraftList": [
+    {
+      "aircraftID": 1,
+      "individualMissionPackageID": 800000688
+    },
+    {
+      "aircraftID": 2,
+      "individualMissionPackageID": 800000689
+    },
+    {
+      "aircraftID": 3,
+      "individualMissionPackageID": 800000690
+    },
+    {
+      "aircraftID": 4,
+      "individualMissionPackageID": 800000691
+    },
+    {
+      "aircraftID": 5,
+      "individualMissionPackageID": 800000692
+    },
+    {
+      "aircraftID": 6,
+      "individualMissionPackageID": 800000693
+    }
+  ]
+}

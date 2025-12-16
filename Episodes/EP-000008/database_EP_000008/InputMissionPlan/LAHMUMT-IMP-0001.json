@@ -1,0 +1,141 @@
+{
+  "timestamp": 819183491065,
+  "inputMissionPackageID": 1,
+  "inputMissionPackageType": 4,
+  "mainSensor": 1,
+  "availableAircraftList": [
+    {
+      "aircraftID": 1
+    },
+    {
+      "aircraftID": 2
+    },
+    {
+      "aircraftID": 3
+    },
+    {
+      "aircraftID": 4
+    },
+    {
+      "aircraftID": 5
+    },
+    {
+      "aircraftID": 6
+    }
+  ],
+  "inputMissionList": [
+    {
+      "inputMissionID": 1,
+      "inputMissionType": 1,
+      "isDone": false,
+      "missionDetail": {
+        "coordinateList": null,
+        "lineList": [
+          {
+            "width": 750.0,
+            "coordinateList": [
+              {
+                "latitude": 38.16396699182945,
+                "longitude": 127.40366744515792,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.161451513233516,
+                "longitude": 127.41704213504593,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.157285489198365,
+                "longitude": 127.42273262555572,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.15260346373537,
+                "longitude": 127.42492958043498,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.140054635644056,
+                "longitude": 127.42353633718984,
+                "altitude": 0
+              }
+            ]
+          }
+        ],
+        "areaList": null
+      }
+    },
+    {
+      "inputMissionID": 2,
+      "inputMissionType": 2,
+      "isDone": false,
+      "missionDetail": {
+        "coordinateList": null,
+        "lineList": null,
+        "areaList": [
+          {
+            "isHole": false,
+            "coordinateList": [
+              {
+                "latitude": 38.11814061964615,
+                "longitude": 127.40386603092938,
+                "altitude": 0.0
+              },
+              {
+                "latitude": 38.1316467147066,
+                "longitude": 127.40386603092938,
+                "altitude": 0.0
+              },
+              {
+                "latitude": 38.1316467147066,
+                "longitude": 127.42491191922718,
+                "altitude": 0.0
+              },
+              {
+                "latitude": 38.11814061964615,
+                "longitude": 127.42491191922718,
+                "altitude": 0.0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "inputMissionID": 3,
+      "inputMissionType": 1,
+      "isDone": false,
+      "missionDetail": {
+        "coordinateList": null,
+        "lineList": [
+          {
+            "width": 750.0,
+            "coordinateList": [
+              {
+                "latitude": 38.10681993333267,
+                "longitude": 127.42191869975265,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.09637620311525,
+                "longitude": 127.41952257891732,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.079211910335985,
+                "longitude": 127.41717456734895,
+                "altitude": 0
+              },
+              {
+                "latitude": 38.063550036883115,
+                "longitude": 127.40998744046689,
+                "altitude": 0
+              }
+            ]
+          }
+        ],
+        "areaList": null
+      }
+    }
+  ]
+}

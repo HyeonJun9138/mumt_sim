@@ -18,6 +18,7 @@ if str(FPL_ROOT) not in sys.path:
 from FPL_Random.run_generator import run_once as generate_once
 from FPL_Random.fpl_random import paths as fpl_paths
 
+DEFAULT_TIMEOUT_SEC = 600.0
 
 def _next_episode_dir(base: Path) -> tuple[str, Path]:
     base.mkdir(parents=True, exist_ok=True)
@@ -25,7 +26,7 @@ def _next_episode_dir(base: Path) -> tuple[str, Path]:
     for p in base.iterdir():
         if not p.is_dir():
             continue
-        m = re.match(r"EP-(\d+)(?:@)?$", p.name)
+        m = re.match(r"EP-(\d+)(?:@)?$", p.name)         
         if m:
             try:
                 max_idx = max(max_idx, int(m.group(1)))
@@ -47,9 +48,11 @@ def _next_episode_dir(base: Path) -> tuple[str, Path]:
 
 
 def _build_episode_paths(ep_dir: Path, tag: str) -> tuple[Path, Path, Path]:
-    db_dir = ep_dir / f"database_{tag}"
-    log0401 = ep_dir / f"0401_{tag}"
-    log0402 = ep_dir / f"0402_{tag}"
+    # Subfolders use an underscore version of the tag to match simulator defaults.
+    tag_safe = tag.replace("-", "_")
+    db_dir = ep_dir / f"database_{tag_safe}"
+    log0401 = ep_dir / f"0401_{tag_safe}"
+    log0402 = ep_dir / f"0402_{tag_safe}"
     for d in (db_dir, log0401, log0402):
         d.mkdir(parents=True, exist_ok=True)
     return db_dir, log0401, log0402
@@ -88,7 +91,7 @@ def run_episode(ep_idx: int, args) -> dict:
     gen_result = generate_once(seed=seed, db_root=db_root)
 
     mission_name = f"{tag}_{int(time.time())}"
-    sim_timeout = args.sim_timeout if args.sim_timeout is not None else args.sim_seconds + 30.0
+    sim_timeout = args.sim_timeout if args.sim_timeout is not None else DEFAULT_TIMEOUT_SEC
     print(
         f"[{tag}] launching sim (time_scale={args.time_scale}, auto-exit={args.sim_seconds}s, exit_on_done={args.exit_on_done})"
     )
@@ -120,8 +123,8 @@ def parse_args():
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=REPO_ROOT / "episodes",
-        help="Root directory to store EP-xxxxx@ folders.",
+        default=REPO_ROOT / "Episodes",
+        help="Root directory to store EP-xxxxxx folders.",
     )
     parser.add_argument("--seed", type=int, default=None, help="Base seed (episode idx added).")
     parser.add_argument("--sim-seconds", type=float, default=120.0, help="Wall-clock seconds before auto-exit.")
@@ -144,7 +147,7 @@ def parse_args():
         "--sim-timeout",
         type=float,
         default=None,
-        help="Subprocess timeout safeguard (defaults to sim-seconds + 30s).",
+        help=f"Subprocess timeout safeguard (defaults to {DEFAULT_TIMEOUT_SEC}s).",
     )
     parser.add_argument(
         "--headless",

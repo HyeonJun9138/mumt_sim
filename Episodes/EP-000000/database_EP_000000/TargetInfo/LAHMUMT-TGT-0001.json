@@ -1,0 +1,143 @@
+{
+  "timestamp": 819181551817,
+  "inputMissionPackageID": 1,
+  "missionReferencePackageID": 1,
+  "targetList": [
+    {
+      "targetID": 1,
+      "targetType": 1,
+      "inputMissionID": 1,
+      "location": {
+        "latitude": 38.05027900963222,
+        "longitude": 127.36577217828604,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.05027900963222,
+          "longitude": 127.36577217828604,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 2,
+      "targetType": 1,
+      "inputMissionID": 1,
+      "location": {
+        "latitude": 38.04615726287202,
+        "longitude": 127.3529110405236,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.04615726287202,
+          "longitude": 127.3529110405236,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 3,
+      "targetType": 2,
+      "inputMissionID": 2,
+      "location": {
+        "latitude": 38.08505617477575,
+        "longitude": 127.39182378416545,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.08505617477575,
+          "longitude": 127.39182378416545,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 4,
+      "targetType": 2,
+      "inputMissionID": 2,
+      "location": {
+        "latitude": 38.087987891661285,
+        "longitude": 127.39384396615975,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.087987891661285,
+          "longitude": 127.39384396615975,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 5,
+      "targetType": 2,
+      "inputMissionID": 2,
+      "location": {
+        "latitude": 38.08203924855577,
+        "longitude": 127.39097420432275,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.08203924855577,
+          "longitude": 127.39097420432275,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 6,
+      "targetType": 1,
+      "inputMissionID": 3,
+      "location": {
+        "latitude": 38.13873957363622,
+        "longitude": 127.39994059668261,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.13873957363622,
+          "longitude": 127.39994059668261,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 7,
+      "targetType": 2,
+      "inputMissionID": 3,
+      "location": {
+        "latitude": 38.12211395776064,
+        "longitude": 127.40388493387361,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.12211395776064,
+          "longitude": 127.40388493387361,
+          "altitude": 0
+        }
+      ]
+    },
+    {
+      "targetID": 8,
+      "targetType": 1,
+      "inputMissionID": 3,
+      "location": {
+        "latitude": 38.14730295240856,
+        "longitude": 127.39292646288416,
+        "altitude": 0
+      },
+      "path": [
+        {
+          "latitude": 38.14730295240856,
+          "longitude": 127.39292646288416,
+          "altitude": 0
+        }
+      ]
+    }
+  ]
+}
