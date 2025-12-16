@@ -10,6 +10,10 @@ Quick 3D waypoint-following demo using the existing UAV dynamics.
 - 튜닝 도중 더 좋은 best 값이 나오면 즉시 --save 파일로 중간 저장(체크포인트)
 - 실행 시 --load를 주지 않아도 --save 파일이 있으면 자동으로 로드해서 그 값으로 시뮬 실행
 - --report로 튜닝 로그(best score, 단계 등) 저장
+
+추가 개선
+- dt가 커질 때(업데이트가 거칠 때) 과도하게 둔해지거나 과격해지는 부분을 줄이도록
+  yaw, pitch, roll, altitude, throttle, lookahead, freeze 거리까지 dt 기반 보정 적용
 """
 
 from __future__ import annotations
@@ -55,6 +59,86 @@ class PIDGains:
     lookahead_m: float = 120.0
     freeze_yaw_dist: float = 50.0
     freeze_alt_ratio: float = 0.5
+
+
+# -----------------------------
+# dt 보정 설정
+# -----------------------------
+# 목표
+# - dt가 커질수록(업데이트가 느릴수록) 같은 게인을 그대로 쓰면 체감 특성이 바뀌는 문제를 완화
+# - 특히 pitch damping 과다(너무 둔해짐) 같은 현상을 줄이기 위해 D 계열은 더 강하게 줄이고
+# - P 계열, I 계열도 완만하게 줄여서 샘플 홀드에서 과격/진동/포화를 줄이도록 한다
+# - lookahead, freeze 거리 같은 기하 파라미터는 dt가 커질수록 약간 키워서 경로 추종을 부드럽게 한다
+
+DT_COMP_REF = 0.01
+
+DT_COMP_MIN_SCALE = 0.35
+DT_COMP_MAX_SCALE = 2.50
+
+# P 계열(각도 오차 -> rate 명령) 보정 지수
+DT_ALPHA_YAW_P = 0.25
+DT_ALPHA_PITCH_P = 0.25
+DT_ALPHA_ROLL_P = 0.25
+
+# I 계열(적분항 출력) 보정 지수
+DT_ALPHA_YAW_I = 0.18
+DT_ALPHA_ALT_I = 0.12
+DT_ALPHA_THROTTLE_I = 0.15
+
+# D/감쇠 계열(rate 피드백) 보정 지수
+DT_ALPHA_PITCH_D = 0.45
+DT_ALPHA_YAW_D = 0.35  # freeze_yaw 모드에서 r 감쇠에 적용
+DT_ALPHA_PITCH_OUTER = 0.10  # alt_pitch 같은 외부루프는 아주 약하게만 보정
+
+# throttle P 및 alt bias 보정
+DT_ALPHA_THROTTLE_P = 0.20
+DT_ALPHA_THROTTLE_ALT = 0.15
+
+# 기하 파라미터는 dt가 커질수록 증가(부드러운 경로)
+DT_ALPHA_LOOKAHEAD_UP = 0.35
+DT_ALPHA_FREEZE_DIST_UP = 0.25
+DT_LOOKAHEAD_MIN_SCALE = 0.60
+DT_LOOKAHEAD_MAX_SCALE = 2.50
+DT_FREEZE_MIN_SCALE = 0.60
+DT_FREEZE_MAX_SCALE = 2.50
+
+
+def _dt_scale_down(
+    dt: float,
+    *,
+    alpha: float,
+    ref: float = DT_COMP_REF,
+    min_scale: float = DT_COMP_MIN_SCALE,
+    max_scale: float = DT_COMP_MAX_SCALE,
+) -> float:
+    """
+    dt가 커질수록 scale이 1보다 작아지게(게인을 줄이는 방향) 스케일을 만든다.
+    scale = (ref/dt)^alpha 를 클램프한다.
+    """
+    if dt <= 0.0:
+        return 1.0
+    ratio = float(ref) / float(dt)
+    scale = float(ratio ** float(alpha))
+    return float(clamp(scale, min_scale, max_scale))
+
+
+def _dt_scale_up(
+    dt: float,
+    *,
+    alpha: float,
+    ref: float = DT_COMP_REF,
+    min_scale: float = 0.60,
+    max_scale: float = 2.50,
+) -> float:
+    """
+    dt가 커질수록 scale이 1보다 커지게(파라미터를 키우는 방향) 스케일을 만든다.
+    scale = (dt/ref)^alpha 를 클램프한다.
+    """
+    if dt <= 0.0:
+        return 1.0
+    ratio = float(dt) / float(ref)
+    scale = float(ratio ** float(alpha))
+    return float(clamp(scale, min_scale, max_scale))
 
 
 # -----------------------------
@@ -137,6 +221,54 @@ def simulate_waypoints(
         # yaw definition matches sim (positive yaw is clockwise, -y forward)
         return wrap_deg(math.degrees(math.atan2(-dy, dx)))
 
+    # dt 기반 보정 스케일(런 전체에서 상수)
+    s_yaw_p = _dt_scale_down(dt, alpha=DT_ALPHA_YAW_P)
+    s_yaw_i = _dt_scale_down(dt, alpha=DT_ALPHA_YAW_I)
+    s_pitch_p = _dt_scale_down(dt, alpha=DT_ALPHA_PITCH_P)
+    s_pitch_d = _dt_scale_down(dt, alpha=DT_ALPHA_PITCH_D)
+    s_roll_p = _dt_scale_down(dt, alpha=DT_ALPHA_ROLL_P)
+
+    s_alt_pitch = _dt_scale_down(dt, alpha=DT_ALPHA_PITCH_OUTER)
+    s_alt_i = _dt_scale_down(dt, alpha=DT_ALPHA_ALT_I)
+
+    s_thr_p = _dt_scale_down(dt, alpha=DT_ALPHA_THROTTLE_P)
+    s_thr_i = _dt_scale_down(dt, alpha=DT_ALPHA_THROTTLE_I)
+    s_thr_alt = _dt_scale_down(dt, alpha=DT_ALPHA_THROTTLE_ALT)
+
+    s_yaw_d = _dt_scale_down(dt, alpha=DT_ALPHA_YAW_D)
+
+    s_lookahead = _dt_scale_up(
+        dt,
+        alpha=DT_ALPHA_LOOKAHEAD_UP,
+        min_scale=DT_LOOKAHEAD_MIN_SCALE,
+        max_scale=DT_LOOKAHEAD_MAX_SCALE,
+    )
+    s_freeze_dist = _dt_scale_up(
+        dt,
+        alpha=DT_ALPHA_FREEZE_DIST_UP,
+        min_scale=DT_FREEZE_MIN_SCALE,
+        max_scale=DT_FREEZE_MAX_SCALE,
+    )
+
+    # 적용된 유효 파라미터
+    yaw_p = float(gains.yaw) * float(s_yaw_p)
+    yaw_i = float(gains.yaw_i) * float(s_yaw_i)
+
+    pitch_rate_p = float(gains.pitch_rate) * float(s_pitch_p)
+    pitch_damp = float(gains.pitch_damp) * float(s_pitch_d)
+
+    alt_pitch = float(gains.alt_pitch) * float(s_alt_pitch)
+    alt_i = float(gains.alt_i) * float(s_alt_i)
+
+    roll_p = 1.5 * float(s_roll_p)
+
+    throttle_p = float(gains.throttle) * float(s_thr_p)
+    throttle_i = float(gains.throttle_i) * float(s_thr_i)
+    throttle_alt = float(gains.throttle_alt) * float(s_thr_alt)
+
+    lookahead_m = float(gains.lookahead_m) * float(s_lookahead)
+    freeze_yaw_dist = float(gains.freeze_yaw_dist) * float(s_freeze_dist)
+
     t = 0.0
     errs_xy: list[float] = []
     errs_alt: list[float] = []
@@ -164,6 +296,7 @@ def simulate_waypoints(
     max_roll_rate = getattr(uav.p, "max_roll_rate_dps", None)
     if max_roll_rate is None:
         max_roll_rate = 1e9  # 파라미터가 없으면 사실상 포화 없음
+    max_roll_rate = float(max_roll_rate)
 
     while t < total_time and curr_idx < len(wp_list):
         tx, ty, tz = wp_list[curr_idx]
@@ -180,53 +313,61 @@ def simulate_waypoints(
             continue
 
         # Lookahead
-        if dist_xy > 1e-3 and gains.lookahead_m > 0.0:
-            lx = uav.s.x + dx / dist_xy * gains.lookahead_m
-            ly = uav.s.y + dy / dist_xy * gains.lookahead_m
+        if dist_xy > 1e-3 and lookahead_m > 0.0:
+            lx = uav.s.x + dx / dist_xy * lookahead_m
+            ly = uav.s.y + dy / dist_xy * lookahead_m
             desired_yaw = _heading_to_target(lx - uav.s.x, ly - uav.s.y)
         else:
             desired_yaw = _heading_to_target(dx, dy)
 
-        freeze_yaw = dist_xy < gains.freeze_yaw_dist and abs(dz) > pos_tol * gains.freeze_alt_ratio
+        freeze_yaw = dist_xy < freeze_yaw_dist and abs(dz) > pos_tol * gains.freeze_alt_ratio
         if freeze_yaw:
-            uav.cmd_yaw_rate = clamp(-uav.s.r * 0.5, -uav.p.max_yaw_rate_dps, uav.p.max_yaw_rate_dps)
+            # dt가 큰 경우 과도하게 yaw를 눌러버리는 느낌을 줄이기 위해 감쇠도 스케일
+            uav.cmd_yaw_rate = clamp(
+                -uav.s.r * (0.5 * s_yaw_d),
+                -uav.p.max_yaw_rate_dps,
+                uav.p.max_yaw_rate_dps,
+            )
         else:
             yaw_err = ((desired_yaw - uav.s.yaw + 540.0) % 360.0) - 180.0
             yaw_err = clamp(yaw_err, -60.0, 60.0)
             yaw_int = clamp(yaw_int + yaw_err * dt, -yaw_int_max, yaw_int_max)
             uav.cmd_yaw_rate = clamp(
-                yaw_err * gains.yaw + yaw_int * gains.yaw_i,
+                yaw_err * yaw_p + yaw_int * yaw_i,
                 -uav.p.max_yaw_rate_dps,
                 uav.p.max_yaw_rate_dps,
             )
 
         # Altitude -> pitch target -> pitch-rate loop
         desired_pitch = clamp(
-            dz * gains.alt_pitch,
+            dz * alt_pitch,
             -uav.p.pitch_limit_deg * 0.7,
             uav.p.pitch_limit_deg * 0.7,
         )
         alt_int = clamp(alt_int + dz * dt, -alt_int_max, alt_int_max)
-        pitch_err = desired_pitch + alt_int * gains.alt_i - uav.s.pitch
-        pitch_cmd = pitch_err * gains.pitch_rate - uav.s.q * gains.pitch_damp
+        pitch_err = desired_pitch + alt_int * alt_i - uav.s.pitch
+
+        # dt가 커질수록 pitch damping 과다로 둔해지는 현상 완화:
+        # pitch_damp 를 dt 보정으로 줄이고, pitch_rate_p 도 완만히 보정
+        pitch_cmd = pitch_err * pitch_rate_p - uav.s.q * pitch_damp
         uav.cmd_pitch_rate = clamp(pitch_cmd, -uav.p.max_pitch_rate_dps, uav.p.max_pitch_rate_dps)
 
-        # Roll damping
-        uav.cmd_roll_rate = -uav.s.roll * 1.5
+        # Roll damping (각도 -> rate)
+        uav.cmd_roll_rate = clamp(-uav.s.roll * roll_p, -max_roll_rate, max_roll_rate)
 
         # Throttle speed hold + altitude bias
         local_speed_target = speed_target * clamp(dist_xy / 300.0, 0.5, 1.0)
         speed_err = local_speed_target - uav.s.u
         speed_int = clamp(speed_int + speed_err * dt, -speed_int_max, speed_int_max)
-        alt_bias = dz * gains.throttle_alt
-        uav.cmd_throttle = clamp(speed_err * gains.throttle + speed_int * gains.throttle_i + alt_bias, -1.0, 1.0)
+        alt_bias = dz * throttle_alt
+        uav.cmd_throttle = clamp(speed_err * throttle_p + speed_int * throttle_i + alt_bias, -1.0, 1.0)
 
         # 포화 카운트 + effort 누적
         if abs(uav.cmd_yaw_rate) >= uav.p.max_yaw_rate_dps - eps:
             sat_yaw += 1
         if abs(uav.cmd_pitch_rate) >= uav.p.max_pitch_rate_dps - eps:
             sat_pitch += 1
-        if abs(uav.cmd_roll_rate) >= float(max_roll_rate) - eps:
+        if abs(uav.cmd_roll_rate) >= max_roll_rate - eps:
             sat_roll += 1
         if abs(uav.cmd_throttle) >= 1.0 - eps:
             sat_thr += 1
@@ -234,7 +375,7 @@ def simulate_waypoints(
         effort += (
             abs(uav.cmd_yaw_rate) / (uav.p.max_yaw_rate_dps + eps)
             + abs(uav.cmd_pitch_rate) / (uav.p.max_pitch_rate_dps + eps)
-            + abs(uav.cmd_roll_rate) / (float(max_roll_rate) + eps)
+            + abs(uav.cmd_roll_rate) / (max_roll_rate + eps)
             + abs(uav.cmd_throttle)
         ) * dt
 
@@ -269,6 +410,24 @@ def simulate_waypoints(
         "sat_total": int(sat_yaw + sat_pitch + sat_roll + sat_thr),
         "aborted": bool(aborted),
         "min_u": float(min_u) if min_u != float("inf") else float("nan"),
+        # 디버그용 dt 보정 정보
+        "dt": float(dt),
+        "dt_ref": float(DT_COMP_REF),
+        "scales": {
+            "yaw_p": float(s_yaw_p),
+            "yaw_i": float(s_yaw_i),
+            "yaw_d_freeze": float(s_yaw_d),
+            "pitch_p": float(s_pitch_p),
+            "pitch_d": float(s_pitch_d),
+            "roll_p": float(s_roll_p),
+            "alt_pitch": float(s_alt_pitch),
+            "alt_i": float(s_alt_i),
+            "thr_p": float(s_thr_p),
+            "thr_i": float(s_thr_i),
+            "thr_alt": float(s_thr_alt),
+            "lookahead": float(s_lookahead),
+            "freeze_dist": float(s_freeze_dist),
+        },
     }
 
     if return_errors and return_info:
@@ -618,13 +777,34 @@ def tune_pid_gains(
                     "suite_size": int(len(waypoint_sets)),
                     "start_cases": start_cases,
                     "seed": int(seed),
+                    "dt_comp": {
+                        "ref": float(DT_COMP_REF),
+                        "min_scale": float(DT_COMP_MIN_SCALE),
+                        "max_scale": float(DT_COMP_MAX_SCALE),
+                        "alphas": {
+                            "yaw_p": float(DT_ALPHA_YAW_P),
+                            "yaw_i": float(DT_ALPHA_YAW_I),
+                            "yaw_d_freeze": float(DT_ALPHA_YAW_D),
+                            "pitch_p": float(DT_ALPHA_PITCH_P),
+                            "pitch_d": float(DT_ALPHA_PITCH_D),
+                            "roll_p": float(DT_ALPHA_ROLL_P),
+                            "alt_pitch_outer": float(DT_ALPHA_PITCH_OUTER),
+                            "alt_i": float(DT_ALPHA_ALT_I),
+                            "thr_p": float(DT_ALPHA_THROTTLE_P),
+                            "thr_i": float(DT_ALPHA_THROTTLE_I),
+                            "thr_alt": float(DT_ALPHA_THROTTLE_ALT),
+                            "lookahead_up": float(DT_ALPHA_LOOKAHEAD_UP),
+                            "freeze_dist_up": float(DT_ALPHA_FREEZE_DIST_UP),
+                        },
+                        "lookahead_scale_clamp": [float(DT_LOOKAHEAD_MIN_SCALE), float(DT_LOOKAHEAD_MAX_SCALE)],
+                        "freeze_scale_clamp": [float(DT_FREEZE_MIN_SCALE), float(DT_FREEZE_MAX_SCALE)],
+                    },
                 }
                 save_report(report_path, rep)
 
     # 1) 전역 탐색(빠른 평가)
     scored_coarse: list[tuple[float, dict[str, float]]] = []
     best_coarse = float("inf")
-    best_coarse_params: dict[str, float] | None = None
 
     for i, p in enumerate(candidates):
         sc = float(eval_coarse(p))
@@ -632,7 +812,6 @@ def tune_pid_gains(
 
         if sc < best_coarse:
             best_coarse = sc
-            best_coarse_params = p
 
             # 새 coarse best를 발견했을 때만 fine 평가해서 체크포인트 갱신 시도
             sc_f = float(eval_fine(p))
@@ -646,7 +825,7 @@ def tune_pid_gains(
 
     # 2) 상위 후보 정밀 평가
     refined_seed: list[tuple[float, dict[str, float]]] = []
-    for i, p in enumerate(top):
+    for p in top:
         sc_f = float(eval_fine(p))
         refined_seed.append((sc_f, p))
         checkpoint(p, sc_f, stage="fine-seed")
@@ -676,7 +855,6 @@ def tune_pid_gains(
             overall_best_params = dict(p_ref)
 
     if overall_best_params is None:
-        # 혹시라도 로컬에 못 들어간 경우
         overall_best_params = refined_seed[0][1]
         overall_best_score = refined_seed[0][0]
 
@@ -704,6 +882,28 @@ def tune_pid_gains(
         "suite_size": int(len(waypoint_sets)),
         "start_cases": start_cases,
         "seed": int(seed),
+        "dt_comp": {
+            "ref": float(DT_COMP_REF),
+            "min_scale": float(DT_COMP_MIN_SCALE),
+            "max_scale": float(DT_COMP_MAX_SCALE),
+            "alphas": {
+                "yaw_p": float(DT_ALPHA_YAW_P),
+                "yaw_i": float(DT_ALPHA_YAW_I),
+                "yaw_d_freeze": float(DT_ALPHA_YAW_D),
+                "pitch_p": float(DT_ALPHA_PITCH_P),
+                "pitch_d": float(DT_ALPHA_PITCH_D),
+                "roll_p": float(DT_ALPHA_ROLL_P),
+                "alt_pitch_outer": float(DT_ALPHA_PITCH_OUTER),
+                "alt_i": float(DT_ALPHA_ALT_I),
+                "thr_p": float(DT_ALPHA_THROTTLE_P),
+                "thr_i": float(DT_ALPHA_THROTTLE_I),
+                "thr_alt": float(DT_ALPHA_THROTTLE_ALT),
+                "lookahead_up": float(DT_ALPHA_LOOKAHEAD_UP),
+                "freeze_dist_up": float(DT_ALPHA_FREEZE_DIST_UP),
+            },
+            "lookahead_scale_clamp": [float(DT_LOOKAHEAD_MIN_SCALE), float(DT_LOOKAHEAD_MAX_SCALE)],
+            "freeze_scale_clamp": [float(DT_FREEZE_MIN_SCALE), float(DT_FREEZE_MAX_SCALE)],
+        },
     }
     if report_path is not None:
         save_report(report_path, report)
@@ -781,6 +981,8 @@ def sweep_time_scales(
         print(f"[sweep] saved aggregate DB to {agg_path}")
     print(f"[sweep] saved DB with {len(records)} entries to {db_path}")
     return db_path, records
+
+
 def plot_trajectory(traj: np.ndarray, waypoints: List[Tuple[float, float, float]]):
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111, projection="3d")
@@ -897,8 +1099,9 @@ def interactive_gui(
             gains=new_gains,
             return_errors=True,
         )
-        line_traj.set_data(t_traj[:, 0], t_traj[:, 1])
-        line_traj.set_3d_properties(t_traj[:, 2])
+        if t_traj.shape[0] > 0:
+            line_traj.set_data(t_traj[:, 0], t_traj[:, 1])
+            line_traj.set_3d_properties(t_traj[:, 2])
 
         err_line_xy.set_ydata(e_xy)
         err_line_xy.set_xdata(np.arange(len(e_xy)))
@@ -907,10 +1110,11 @@ def interactive_gui(
         ax_err.relim()
         ax_err.autoscale_view()
 
-        status_text.set_text(
-            f"mean XY {np.mean(e_xy):.1f} m, max XY {np.max(e_xy):.1f} m | "
-            f"mean alt {np.mean(e_alt):.1f} m, max alt {np.max(e_alt):.1f} m"
-        )
+        if len(e_xy) > 0 and len(e_alt) > 0:
+            status_text.set_text(
+                f"mean XY {np.mean(e_xy):.1f} m, max XY {np.max(e_xy):.1f} m | "
+                f"mean alt {np.mean(e_alt):.1f} m, max alt {np.max(e_alt):.1f} m"
+            )
 
         if t_traj.shape[0] > 0:
             ax.set_xlim(np.min(t_traj[:, 0]), np.max(t_traj[:, 0]))

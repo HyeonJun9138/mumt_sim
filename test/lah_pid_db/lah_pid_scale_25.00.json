@@ -1,0 +1,14 @@
+{
+  "yaw": 1.8143125000000002,
+  "yaw_i": 0.01680914572439142,
+  "pitch_rate": 3.2,
+  "pitch_damp": 0.2,
+  "alt_pitch": 0.09,
+  "alt_i": 0.17074999999999999,
+  "throttle": 0.02,
+  "throttle_alt": 0.005000000000000002,
+  "throttle_i": 0.02766136138066072,
+  "lookahead_m": 33.625,
+  "freeze_yaw_dist": 122.84196209162833,
+  "freeze_alt_ratio": 0.5
+}

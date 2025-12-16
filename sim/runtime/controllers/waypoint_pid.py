@@ -49,6 +49,7 @@ class WaypointTarget:
     filming: dict | None = None
     wp_id: int | None = None
     hover_time: float | None = None
+    loiter: dict | None = None
 
 
 def load_pid_gains(path: str | Path | None = None, fallback: PIDGains | None = None) -> PIDGains:
@@ -114,6 +115,7 @@ class WaypointPIDController:
                 filming = wp.get("filming")
                 wp_id = wp.get("wp_id")
                 hover_time = wp.get("hover_time")
+                loiter = wp.get("loiter")
                 if isinstance(pos, (list, tuple)) and len(pos) == 3:
                     self.targets.append(
                         WaypointTarget(
@@ -122,6 +124,7 @@ class WaypointPIDController:
                             filming=filming,
                             wp_id=int(wp_id) if wp_id is not None else None,
                             hover_time=float(hover_time) if hover_time is not None else None,
+                            loiter=loiter,
                         )
                     )
             elif isinstance(wp, (list, tuple)) and len(wp) == 3:
@@ -139,6 +142,13 @@ class WaypointPIDController:
         self.speed_int_max = 10.0
         self.hover_timer = 0.0
         self.is_hovering = False
+        self.is_loitering = False
+        self.loiter_timer = 0.0
+        self.loiter_center = (0.0, 0.0, 0.0)
+        self.loiter_radius = 0.0
+        self.loiter_speed = 0.0
+        self.loiter_dir = 1.0
+        self.loiter_angle = 0.0
 
     def _heading_to_target(self, dx: float, dy: float) -> float:
         return wrap_deg(math.degrees(math.atan2(-dy, dx)))
@@ -148,6 +158,10 @@ class WaypointPIDController:
         self.yaw_int = 0.0
         self.alt_int = 0.0
         self.speed_int = 0.0
+        self.is_hovering = False
+        self.hover_timer = 0.0
+        self.is_loitering = False
+        self.loiter_timer = 0.0
         if self.curr_idx >= len(self.targets):
             self.finished = True
             self._apply_hold()
@@ -167,9 +181,13 @@ class WaypointPIDController:
             return None
         return self.targets[self.curr_idx]
 
-    def update(self, dt: float, dem=None) -> bool:
+    def update(self, dt: float, dem=None, wall_dt: float | None = None) -> bool:
         if self.finished or not self.targets:
             return False
+
+        # wall_dt is real-world seconds (unscaled); if not provided, fall back to dt.
+        if wall_dt is None:
+            wall_dt = dt
 
         dt = clamp(dt, 0.001, 0.05)
         if self.curr_idx >= len(self.targets):
@@ -193,13 +211,78 @@ class WaypointPIDController:
         dz = tz - self.uav.s.z
         dist_xy = math.hypot(dx, dy)
 
-        if dist_xy < self.pos_tol and abs(dz) < self.pos_tol * 0.6:
+        uav = self.uav
+        gains = self.gains
+
+        # If already loitering, steer to moving point on the loiter circle.
+        if self.is_loitering:
+            self.loiter_timer = max(0.0, self.loiter_timer - wall_dt)
+            if self.loiter_timer <= 0.0:
+                self.is_loitering = False
+                self._advance_wp()
+                return not self.finished
+            radius = max(1.0, self.loiter_radius)
+            speed = max(0.0, self.loiter_speed if self.loiter_speed > 0 else (target.speed or self.speed_target))
+            ang_rate = speed / radius
+            self.loiter_angle += self.loiter_dir * ang_rate * dt
+            tx = self.loiter_center[0] + radius * math.cos(self.loiter_angle)
+            ty = self.loiter_center[1] + radius * math.sin(self.loiter_angle)
+            tz = self.loiter_center[2]
+            dx = tx - uav.s.x
+            dy = ty - uav.s.y
+            dz = tz - uav.s.z
+            dist_xy = math.hypot(dx, dy)
+
+        if not self.is_loitering and dist_xy < self.pos_tol and abs(dz) < self.pos_tol * 0.6:
             target_hover = float(target.hover_time) if (self.allow_hover and target and target.hover_time) else 0.0
+            loiter_prop = target.loiter if isinstance(target.loiter, dict) else None
+            loiter_time = 0.0
+            if loiter_prop:
+                try:
+                    loiter_time = float(loiter_prop.get("time", 0.0) or 0.0)
+                except Exception:
+                    loiter_time = 0.0
+            if loiter_time > 0.0 and loiter_prop:
+                # Start loiter: set circle params and reuse main control loop.
+                self.is_loitering = True
+                self.loiter_timer = loiter_time
+                self.loiter_center = (tx, ty, tz)
+                try:
+                    self.loiter_radius = float(loiter_prop.get("radius", 0.0) or 0.0)
+                except Exception:
+                    self.loiter_radius = 0.0
+                try:
+                    self.loiter_speed = float(loiter_prop.get("speed", 0.0) or (target.speed or self.speed_target))
+                except Exception:
+                    self.loiter_speed = target.speed or self.speed_target
+                direction = loiter_prop.get("direction", 1)
+                self.loiter_dir = -1.0 if direction == 1 else 1.0
+                # Initialize angle from current heading to center to avoid jump.
+                self.loiter_angle = math.atan2(uav.s.y - ty, uav.s.x - tx)
+                # Immediately compute first loiter target point.
+                radius = max(1.0, self.loiter_radius)
+                speed = max(0.0, self.loiter_speed if self.loiter_speed > 0 else (target.speed or self.speed_target))
+                ang_rate = speed / radius
+                self.loiter_angle += self.loiter_dir * ang_rate * dt
+                tx = self.loiter_center[0] + radius * math.cos(self.loiter_angle)
+                ty = self.loiter_center[1] + radius * math.sin(self.loiter_angle)
+                tz = self.loiter_center[2]
+                dx = tx - uav.s.x
+                dy = ty - uav.s.y
+                dz = tz - uav.s.z
+                dist_xy = math.hypot(dx, dy)
             if target_hover > 0.0:
                 if not self.is_hovering:
                     self.hover_timer = target_hover
                     self.is_hovering = True
-                self.hover_timer = max(0.0, self.hover_timer - dt)
+                else:
+                    self.hover_timer = max(0.0, self.hover_timer - wall_dt)
+                if self.hover_timer <= 0.0:
+                    # Hover time elapsed; advance to next WP.
+                    self.is_hovering = False
+                    self._advance_wp()
+                    return not self.finished
+                # Hold attitude/altitude while hovering.
                 uav.cmd_yaw_rate = clamp(-uav.s.r * 0.5, -uav.p.max_yaw_rate_dps, uav.p.max_yaw_rate_dps)
                 alt_err = (tz - uav.s.z)
                 uav.cmd_pitch_rate = clamp(alt_err * gains.pitch_rate, -uav.p.max_pitch_rate_dps, uav.p.max_pitch_rate_dps)
@@ -208,9 +291,6 @@ class WaypointPIDController:
                 return True
             self._advance_wp()
             return not self.finished
-
-        gains = self.gains
-        uav = self.uav
 
         # Lookahead for smoother turns
         if dist_xy > 1e-3 and gains.lookahead_m > 0.0:

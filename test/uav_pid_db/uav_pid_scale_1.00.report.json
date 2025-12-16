@@ -1,7 +1,7 @@
 {
-  "timestamp": "2025-12-16T04:44:47",
+  "timestamp": "2025-12-16T14:38:54",
   "best_score": 20733.99817143672,
-  "best_stage": "local-r1",
+  "best_stage": "final",
   "best_params": {
     "yaw": 0.7034928181628536,
     "yaw_i": 0.024126824285276113,

@@ -150,6 +150,7 @@ class SimulationApp:
         self.pid_db_path_uav: Path = REPO_ROOT / "sim" / "runtime" / "controllers" / "uav_pid_db.json"
         self.pid_db_path_lah: Path = REPO_ROOT / "sim" / "runtime" / "controllers" / "lah_pid_db.json"
         self.pid_db_cache: dict[str, list[dict]] = {}
+        self.pid_choice_log: dict[str, tuple[float | None, str, float]] = {}
         self.uav_autopilots: list[WaypointPIDController | None] = []
         self.uav_filming_props: list[dict | None] = []
         self.uav_current_wp_ids: list[int | None] = []
@@ -204,7 +205,7 @@ class SimulationApp:
                 self._update_targets_and_missiles(dt_sim)
                 detection_lines = self._evaluate_threats(dt_sim)
                 # Run autopilots over the full sim dt using fixed-size control steps to stay stable at high time_scale.
-                self._update_autopilots(dt_sim)
+                self._update_autopilots(dt_sim, dt)
                 self._send_controls_to_workers(time_scale_val)
                 self._remove_destroyed_targets()
                 self.state.latest_agent_status_0401 = build_agent_status_snapshot(
@@ -694,10 +695,15 @@ class SimulationApp:
             return records
         return None
 
-    def _pick_gains_for_scale(self, db_path: Path, fallback_path: Path, time_scale: float) -> PIDGains:
+    def _pick_gains_for_scale(
+        self, db_path: Path, fallback_path: Path, time_scale: float, craft_label: str | None = None
+    ) -> PIDGains:
         records = self._load_gain_db(db_path)
+        label = craft_label or db_path.stem
+        chosen_ts: float | None = None
+        chosen_path: str | None = None
         if records:
-            best = None
+            best_rec = None
             best_diff = float("inf")
             for r in records:
                 ts = r.get("time_scale")
@@ -707,15 +713,39 @@ class SimulationApp:
                 diff = abs(float(ts) - float(time_scale))
                 if diff < best_diff:
                     best_diff = diff
-                    best = g
-            if best:
+                    best_rec = r
+            if best_rec:
+                gains_dict = best_rec.get("gains")
                 try:
-                    return PIDGains(**best)
+                    gains_obj = PIDGains(**gains_dict)
+                    chosen_ts = float(best_rec.get("time_scale")) if best_rec.get("time_scale") is not None else None
+                    chosen_path = best_rec.get("gains_path") or str(db_path)
+                    choice = (chosen_ts, chosen_path, round(time_scale, 2))
+                    prev = self.pid_choice_log.get(label)
+                    if prev != choice:
+                        ts_disp = chosen_ts if chosen_ts is not None else time_scale
+                        print(f"[pid-db] {label}: time_scale={time_scale:.2f} -> record ts={ts_disp:.2f} from {chosen_path}")
+                        self.pid_choice_log[label] = choice
+                    return gains_obj
                 except Exception as e:
                     print(f"[pid-db] failed to build gains from record: {e}")
         # fallback: flat gains file
         g = load_pid_gains(fallback_path)
-        return g if g is not None else DEFAULT_TUNED_GAINS
+        if g is not None:
+            source = str(fallback_path)
+            choice = (None, source, round(time_scale, 2))
+            prev = self.pid_choice_log.get(label)
+            if prev != choice:
+                print(f"[pid-db] {label}: time_scale={time_scale:.2f} -> fallback gains {source}")
+                self.pid_choice_log[label] = choice
+            return g
+        source = "DEFAULT_TUNED_GAINS"
+        choice = (None, source, round(time_scale, 2))
+        prev = self.pid_choice_log.get(label)
+        if prev != choice:
+            print(f"[pid-db] {label}: time_scale={time_scale:.2f} -> using default tuned gains")
+            self.pid_choice_log[label] = choice
+        return DEFAULT_TUNED_GAINS
 
     def _convert_line_search_points(self, line_search: dict) -> list[tuple[float, float, float]]:
         coords = line_search.get("coordinateList") or []
@@ -735,12 +765,10 @@ class SimulationApp:
         return pts
 
     def _build_line_search_segments(self, pts: list[tuple[float, float, float]]) -> list[tuple[tuple[float, float, float], tuple[float, float, float]]]:
-        """Build line segments from point list in pairs (p0,p1), ignoring lone tail."""
+        """Build consecutive segments (p0->p1, p1->p2, ...) for smooth polyline sweep."""
         segs = []
-        for i in range(0, len(pts) - 1, 2):
-            p0 = pts[i]
-            p1 = pts[i + 1]
-            segs.append((p0, p1))
+        for i in range(len(pts) - 1):
+            segs.append((pts[i], pts[i + 1]))
         return segs
 
     def _update_filming_target(self, idx: int, tgt: WaypointTarget | None, dt: float):
@@ -1021,7 +1049,21 @@ class SimulationApp:
                 mode = filming.get("operationMode") if isinstance(filming, dict) else None
                 mode_text = mode_labels.get(mode, "없음") if mode is not None else "없음"
                 sub_color = (255, 220, 180) if idx == self.state.active_idx else (180, 180, 180)
-                label_entries.append((sx, sy - 12, f"WP {wp_id if wp_id is not None else '-'} | 촬영 모드: {mode_text}", sub_color))
+                status_text = ""
+                if idx < len(self.uav_autopilots):
+                    ap = self.uav_autopilots[idx]
+                    if ap is not None:
+                        if getattr(ap, "is_loitering", False):
+                            remaining = max(0.0, getattr(ap, "loiter_timer", 0.0))
+                            status_text = f" | 상태: 선회중 ({remaining:.1f}s)"
+                        elif getattr(ap, "is_hovering", False):
+                            remaining = max(0.0, getattr(ap, "hover_timer", 0.0))
+                            status_text = f" | 상태: 호버링 ({remaining:.1f}s)"
+                        else:
+                            status_text = " | 상태: 이동중"
+                label_entries.append(
+                    (sx, sy - 12, f"WP {wp_id if wp_id is not None else '-'} | 촬영 모드: {mode_text}{status_text}", sub_color)
+                )
         # Flight path point labels (visible subset only)
         for info in getattr(self, "_flight_path_labels", []):
             px, py, pz = gluProject(info["pos"][0], info["pos"][1], info["pos"][2] + 5.0, model, proj, viewport)
@@ -1420,10 +1462,37 @@ class SimulationApp:
                         "speed": speed,
                         "filming": wp.get("filmingProperty"),
                         "hover_time": hover,
+                        "loiter": wp.get("loiterProperty"),
                     }
                 )
                 counts[idx] += 1
         self.state.flight_paths = paths_per_aircraft
+        # Lift initial spawn to first waypoint to avoid ground collision (especially for LAH with z=100 default).
+        for idx, plist in enumerate(paths_per_aircraft):
+            if not plist:
+                continue
+            first = plist[0]
+            pos = first.get("pos")
+            if not pos or len(pos) != 3:
+                continue
+            with self.state.uav_locks[idx]:
+                try:
+                    fx, fy, fz = map(float, pos)
+                    self.state.uavs[idx].s.x = fx
+                    self.state.uavs[idx].s.y = fy
+                    self.state.uavs[idx].s.z = max(fz, self.dem.get_height(fx, fy) + 5.0)
+                    # Give rotorcraft a small forward speed to avoid stall/ground clamp on start.
+                    if self.state.uav_types[idx] == "LAH":
+                        self.state.uavs[idx].s.u = max(5.0, float(first.get("speed") or 0.0) * 0.25)
+                except Exception:
+                    pass
+            # Keep reset position in sync.
+            if idx < len(self.state.initial_spawn_points):
+                self.state.initial_spawn_points[idx] = (
+                    self.state.uavs[idx].s.x,
+                    self.state.uavs[idx].s.y,
+                    self.state.uavs[idx].s.z,
+                )
         for idx, cnt in enumerate(counts):
             if cnt > 0:
                 name = "LAH" if idx < 3 else "UAV"
@@ -1456,12 +1525,14 @@ class SimulationApp:
                 filming = None
                 wp_id = None
                 hover_time = None
+                loiter = None
                 if isinstance(wp, dict):
                     pos = wp.get("pos")
                     speed = wp.get("speed")
                     filming = wp.get("filming")
                     wp_id = wp.get("wp_id")
                     hover_time = wp.get("hover_time")
+                    loiter = wp.get("loiter")
                 elif isinstance(wp, (list, tuple)) and len(wp) == 3:
                     pos = wp
                 if pos is None:
@@ -1477,6 +1548,7 @@ class SimulationApp:
                         filming=filming,
                         wp_id=int(wp_id) if wp_id is not None else None,
                         hover_time=float(hover_time) if hover_time is not None else None,
+                        loiter=loiter,
                     )
                 )
 
@@ -1484,7 +1556,8 @@ class SimulationApp:
                 is_uav = self.state.uav_types[idx] == "UAV"
                 gains_path = self.pid_db_path_uav if is_uav else self.pid_db_path_lah
                 fallback_path = self.pid_gains_path if is_uav else self.pid_gains_path_lah
-                gains = self._pick_gains_for_scale(gains_path, fallback_path, time_scale)
+                label = ("UAV" if is_uav else "LAH") + f"{idx + 1}"
+                gains = self._pick_gains_for_scale(gains_path, fallback_path, time_scale, craft_label=label)
                 self.uav_autopilots[idx] = WaypointPIDController(
                     self.state.uavs[idx],
                     targets,
@@ -1498,7 +1571,7 @@ class SimulationApp:
                 self.uav_current_wp_ids[idx] = int(targets[0].wp_id) if targets[0].wp_id is not None else None
                 print(f"[pid-autopilot] armed for {('UAV' if is_uav else 'LAH')}{idx + 1} with {len(targets)} waypoints.")
 
-    def _update_autopilots(self, dt_sim: float):
+    def _update_autopilots(self, dt_sim: float, wall_dt: float):
         """
         Advance UAV PID autopilots over the current simulation dt by sub-stepping
         with a fixed control step (self.sim_step) so high time_scale does not
@@ -1514,10 +1587,12 @@ class SimulationApp:
             is_uav = self.state.uav_types[idx] == "UAV"
             gains_path = self.pid_db_path_uav if is_uav else self.pid_db_path_lah
             fallback_path = self.pid_gains_path if is_uav else self.pid_gains_path_lah
-            ap.gains = self._pick_gains_for_scale(gains_path, fallback_path, time_scale)
+            label = ("UAV" if is_uav else "LAH") + f"{idx + 1}"
+            ap.gains = self._pick_gains_for_scale(gains_path, fallback_path, time_scale, craft_label=label)
             pending = self.state.pending_states[idx]
             if pending:
                 # Use buffered state samples (arrive at sim_step spacing) to keep control in sync.
+                wall_slice = wall_dt / len(pending)
                 for state_tuple in pending:
                     (
                         self.state.uavs[idx].s.x,
@@ -1531,14 +1606,16 @@ class SimulationApp:
                         self.state.uavs[idx].s.q,
                         self.state.uavs[idx].s.r,
                     ) = state_tuple
-                    ap.update(ctrl_step, dem=self.dem)
+                    ap.update(ctrl_step, dem=self.dem, wall_dt=wall_slice)
                     self._update_filming_target(idx, ap.current_target(), ctrl_step)
             else:
                 # Fallback: advance over the reported dt_sim in fixed steps.
                 remaining = max(0.0, float(dt_sim))
+                total_sim = remaining if remaining > 0 else ctrl_step
                 while remaining > 0.0:
                     step = ctrl_step if remaining >= ctrl_step else remaining
-                    ap.update(step, dem=self.dem)
+                    wall_slice = wall_dt * (step / total_sim) if total_sim > 0 else 0.0
+                    ap.update(step, dem=self.dem, wall_dt=wall_slice)
                     self._update_filming_target(idx, ap.current_target(), step)
                     remaining -= step
 
