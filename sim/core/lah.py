@@ -122,6 +122,9 @@ class LAH:
 
         a = self.p.accel * clamp(self.cmd_throttle, -1.0, 1.0)
         self.s.u = clamp(self.s.u + a * dt, self.p.min_speed, self.p.max_speed)
+        # If throttle is zero and forward speed is very small, clamp to zero to avoid drift during hover.
+        if abs(self.cmd_throttle) < 1e-6 and self.s.u < 0.5:
+            self.s.u = 0.0
 
         # Simple body-to-world: allow hover by reducing forward projection when pitch ~0
         yaw = math.radians(self.s.yaw)

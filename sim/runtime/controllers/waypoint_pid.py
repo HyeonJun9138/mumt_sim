@@ -214,6 +214,23 @@ class WaypointPIDController:
         uav = self.uav
         gains = self.gains
 
+        target_hover = float(target.hover_time) if (self.allow_hover and target and target.hover_time) else 0.0
+        # If already hovering (only for allow_hover airframes like LAH), keep decrementing timer even if we drift slightly.
+        if self.allow_hover and self.is_hovering and target_hover > 0.0:
+            self.hover_timer = max(0.0, self.hover_timer - wall_dt)
+            if self.hover_timer <= 0.0:
+                self.is_hovering = False
+                self._advance_wp()
+                return not self.finished
+            # Hold attitude/altitude while hovering.
+            self.uav.s.u = 0.0  # force zero forward speed during hover
+            uav.cmd_throttle = 0.0  # keep forward accel neutral
+            uav.cmd_yaw_rate = clamp(-uav.s.r * 0.5, -uav.p.max_yaw_rate_dps, uav.p.max_yaw_rate_dps)
+            alt_err = (tz - uav.s.z)
+            uav.cmd_pitch_rate = clamp(alt_err * gains.pitch_rate, -uav.p.max_pitch_rate_dps, uav.p.max_pitch_rate_dps)
+            uav.cmd_roll_rate = clamp(-uav.s.roll * 1.5, -uav.p.max_roll_rate_dps, uav.p.max_roll_rate_dps)
+            return True
+
         # If already loitering, steer to moving point on the loiter circle.
         if self.is_loitering:
             self.loiter_timer = max(0.0, self.loiter_timer - wall_dt)
@@ -234,7 +251,6 @@ class WaypointPIDController:
             dist_xy = math.hypot(dx, dy)
 
         if not self.is_loitering and dist_xy < self.pos_tol and abs(dz) < self.pos_tol * 0.6:
-            target_hover = float(target.hover_time) if (self.allow_hover and target and target.hover_time) else 0.0
             loiter_prop = target.loiter if isinstance(target.loiter, dict) else None
             loiter_time = 0.0
             if loiter_prop:
@@ -271,7 +287,7 @@ class WaypointPIDController:
                 dy = ty - uav.s.y
                 dz = tz - uav.s.z
                 dist_xy = math.hypot(dx, dy)
-            if target_hover > 0.0:
+            if self.allow_hover and target_hover > 0.0:
                 if not self.is_hovering:
                     self.hover_timer = target_hover
                     self.is_hovering = True
@@ -283,11 +299,12 @@ class WaypointPIDController:
                     self._advance_wp()
                     return not self.finished
                 # Hold attitude/altitude while hovering.
+                self.uav.s.u = 0.0  # force zero forward speed during hover
+                uav.cmd_throttle = 0.0  # keep forward accel neutral
                 uav.cmd_yaw_rate = clamp(-uav.s.r * 0.5, -uav.p.max_yaw_rate_dps, uav.p.max_yaw_rate_dps)
                 alt_err = (tz - uav.s.z)
                 uav.cmd_pitch_rate = clamp(alt_err * gains.pitch_rate, -uav.p.max_pitch_rate_dps, uav.p.max_pitch_rate_dps)
                 uav.cmd_roll_rate = clamp(-uav.s.roll * 1.5, -uav.p.max_roll_rate_dps, uav.p.max_roll_rate_dps)
-                uav.cmd_throttle = clamp(alt_err * gains.throttle_alt, -1.0, 1.0)
                 return True
             self._advance_wp()
             return not self.finished

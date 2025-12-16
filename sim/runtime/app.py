@@ -1483,7 +1483,14 @@ class SimulationApp:
                     self.state.uavs[idx].s.z = max(fz, self.dem.get_height(fx, fy) + 5.0)
                     # Give rotorcraft a small forward speed to avoid stall/ground clamp on start.
                     if self.state.uav_types[idx] == "LAH":
-                        self.state.uavs[idx].s.u = max(5.0, float(first.get("speed") or 0.0) * 0.25)
+                        try:
+                            first_speed = float(first.get("speed") or 0.0)
+                        except Exception:
+                            first_speed = 0.0
+                        if first_speed > 0.0:
+                            self.state.uavs[idx].s.u = max(5.0, first_speed * 0.25)
+                        else:
+                            self.state.uavs[idx].s.u = 0.0
                 except Exception:
                     pass
             # Keep reset position in sync.
@@ -1526,6 +1533,7 @@ class SimulationApp:
                 wp_id = None
                 hover_time = None
                 loiter = None
+                hover_prop = None
                 if isinstance(wp, dict):
                     pos = wp.get("pos")
                     speed = wp.get("speed")
@@ -1533,6 +1541,7 @@ class SimulationApp:
                     wp_id = wp.get("wp_id")
                     hover_time = wp.get("hover_time")
                     loiter = wp.get("loiter")
+                    hover_prop = wp.get("hover_prop") or wp.get("hovering")
                 elif isinstance(wp, (list, tuple)) and len(wp) == 3:
                     pos = wp
                 if pos is None:
@@ -1544,7 +1553,7 @@ class SimulationApp:
                 targets.append(
                     WaypointTarget(
                         pos=(float(px), float(py), float(pz)),
-                        speed=speed,
+                        speed=0.0 if hover_time else speed,
                         filming=filming,
                         wp_id=int(wp_id) if wp_id is not None else None,
                         hover_time=float(hover_time) if hover_time is not None else None,
