@@ -3,19 +3,37 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .base import OperationMode
+from .base import OperationContext, OperationMode, OperationResult
 
 
 @dataclass
 class ModeCoordinateDesignate(OperationMode):
-    """Mode 1: 좌표 지정 (Coordinate Designate)."""
+    """Mode 1: coordinate designate."""
 
-    target_coordinate: tuple[float, float, float] | None = None  # (x, y, z)
+    mode_id: int = 1
 
-    def __init__(self, target_coordinate: tuple[float, float, float] | None = None):
-        super().__init__(mode_id=1)
-        self.target_coordinate = target_coordinate
+    def apply(
+        self,
+        *,
+        uav: Any,
+        filming_prop: dict,
+        ctx: OperationContext,
+        dt: float,
+        current_wp_id: int | None,
+        prev_state: Any,
+    ) -> OperationResult:
+        coord_orient = filming_prop.get("coordinateOrientation") or {}
+        coord = coord_orient.get("coordinate") or {}
+        lon = coord.get("longitude")
+        lat = coord.get("latitude")
+        alt = coord.get("altitude", 0.0)
 
-    def apply(self, *args: Any, **kwargs: Any) -> None:
-        # TODO: point sensor/aircraft toward target_coordinate
-        pass
+        if lon is None or lat is None:
+            return OperationResult(target=ctx.default_target_fn(uav), state=None)
+
+        try:
+            x, y = ctx.dem.lonlat_to_env(lon, lat)
+            z = ctx.dem.get_height(x, y) if alt == 0 else float(alt)
+            return OperationResult(target=(float(x), float(y), float(z)), state=None)
+        except Exception:
+            return OperationResult(target=ctx.default_target_fn(uav), state=None)

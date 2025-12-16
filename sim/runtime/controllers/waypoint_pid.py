@@ -217,7 +217,7 @@ class WaypointPIDController:
         target_hover = float(target.hover_time) if (self.allow_hover and target and target.hover_time) else 0.0
         # If already hovering (only for allow_hover airframes like LAH), keep decrementing timer even if we drift slightly.
         if self.allow_hover and self.is_hovering and target_hover > 0.0:
-            self.hover_timer = max(0.0, self.hover_timer - wall_dt)
+            self.hover_timer = max(0.0, self.hover_timer - dt)
             if self.hover_timer <= 0.0:
                 self.is_hovering = False
                 self._advance_wp()
@@ -233,7 +233,7 @@ class WaypointPIDController:
 
         # If already loitering, steer to moving point on the loiter circle.
         if self.is_loitering:
-            self.loiter_timer = max(0.0, self.loiter_timer - wall_dt)
+            self.loiter_timer = max(0.0, self.loiter_timer - dt)
             if self.loiter_timer <= 0.0:
                 self.is_loitering = False
                 self._advance_wp()
@@ -292,7 +292,7 @@ class WaypointPIDController:
                     self.hover_timer = target_hover
                     self.is_hovering = True
                 else:
-                    self.hover_timer = max(0.0, self.hover_timer - wall_dt)
+                    self.hover_timer = max(0.0, self.hover_timer - dt)
                 if self.hover_timer <= 0.0:
                     # Hover time elapsed; advance to next WP.
                     self.is_hovering = False

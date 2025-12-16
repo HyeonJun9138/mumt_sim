@@ -3,19 +3,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .base import OperationMode
+from .base import OperationContext, OperationMode, OperationResult
 
 
 @dataclass
 class ModeAutoTracking(OperationMode):
-    """Mode 3: 자동 추적 (Auto Tracking)."""
+    """Mode 3: auto-tracking placeholder."""
 
-    target_id: int | None = None
+    mode_id: int = 3
 
-    def __init__(self, target_id: int | None = None):
-        super().__init__(mode_id=3)
-        self.target_id = target_id
-
-    def apply(self, *args: Any, **kwargs: Any) -> None:
-        # TODO: track the given target
-        pass
+    def apply(
+        self,
+        *,
+        uav: Any,
+        filming_prop: dict,
+        ctx: OperationContext,
+        dt: float,
+        current_wp_id: int | None,
+        prev_state: Any,
+    ) -> OperationResult:
+        # Tracking behaviour is not yet implemented; default to downward look.
+        return OperationResult(target=ctx.default_target_fn(uav), state=None)

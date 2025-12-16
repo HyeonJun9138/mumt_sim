@@ -9,14 +9,14 @@ from .line_search import ModeLineSearch
 from .base import OperationMode
 
 
-def build_operation_mode(mode_id: int, **kwargs: Any) -> OperationMode:
-    """Factory: return stub instance for mode 1~4; others raise ValueError."""
+def build_operation_mode(mode_id: int, **_: Any) -> OperationMode:
+    """Factory: return concrete instance for supported modes 1~4."""
     if mode_id == 1:
-        return ModeCoordinateDesignate(**kwargs)
+        return ModeCoordinateDesignate()
     if mode_id == 2:
-        return ModeLineSearch(**kwargs)
+        return ModeLineSearch()
     if mode_id == 3:
-        return ModeAutoTracking(**kwargs)
+        return ModeAutoTracking()
     if mode_id == 4:
-        return ModeAircraftFixed(**kwargs)
+        return ModeAircraftFixed()
     raise ValueError(f"Unsupported operation mode: {mode_id}")

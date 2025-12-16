@@ -1,18 +1,18 @@
 {
-  "timestamp": "2025-12-16T07:36:15",
-  "best_score": 27989.686810637468,
+  "timestamp": "2025-12-16T16:54:40",
+  "best_score": 27586.48280890117,
   "best_stage": "final",
   "best_params": {
-    "yaw": 1.4027294757473439,
-    "yaw_i": 0.016874999999999998,
-    "pitch_rate": 3.046271040845294,
+    "yaw": 2.5,
+    "yaw_i": 0.03262499999999998,
+    "pitch_rate": 3.2,
     "pitch_damp": 0.2,
     "alt_pitch": 0.09,
-    "alt_i": 0.17525000000000002,
+    "alt_i": 0.19999999999999998,
     "throttle": 0.02,
     "throttle_alt": 0.005000000000000002,
-    "throttle_i": 0.02522248664478057,
-    "lookahead_m": 27.71875,
+    "throttle_i": 0.04209748664478058,
+    "lookahead_m": 12.3625,
     "freeze_yaw_dist": 16.94615676631074
   },
   "speed_target": 60.0,
@@ -52,5 +52,33 @@
       60.0
     ]
   ],
-  "seed": 0
+  "seed": 0,
+  "dt_comp": {
+    "ref": 0.01,
+    "min_scale": 0.35,
+    "max_scale": 2.5,
+    "alphas": {
+      "yaw_p": 0.25,
+      "yaw_i": 0.18,
+      "yaw_d_freeze": 0.35,
+      "pitch_p": 0.25,
+      "pitch_d": 0.45,
+      "roll_p": 0.25,
+      "alt_pitch_outer": 0.1,
+      "alt_i": 0.12,
+      "thr_p": 0.2,
+      "thr_i": 0.15,
+      "thr_alt": 0.15,
+      "lookahead_up": 0.35,
+      "freeze_dist_up": 0.25
+    },
+    "lookahead_scale_clamp": [
+      0.6,
+      2.5
+    ],
+    "freeze_scale_clamp": [
+      0.6,
+      2.5
+    ]
+  }
 }
