@@ -1,30 +1,30 @@
 {
-  "timestamp": "2025-12-16T15:37:29",
-  "best_score": 20741.4115460697,
+  "timestamp": "2025-12-16T19:13:39",
+  "best_score": 29718.324990360663,
   "best_stage": "final",
   "best_params": {
-    "yaw": 0.7041044757473436,
-    "yaw_i": 0.020982478915115274,
-    "pitch_rate": 3.2,
+    "yaw": 0.6850373401722264,
+    "yaw_i": 0.0252,
+    "pitch_rate": 4.2,
     "pitch_damp": 0.2,
-    "alt_pitch": 0.09,
-    "alt_i": 0.2,
+    "alt_pitch": 0.12,
+    "alt_i": 0.24879535294078647,
     "throttle": 0.02,
-    "throttle_alt": 0.0025000000000000005,
-    "throttle_i": 0.024689991096520383,
-    "lookahead_m": 54.31266365242565,
-    "freeze_yaw_dist": 16.94615676631074
+    "throttle_alt": 0.005000000000000002,
+    "throttle_i": 0.023189485470284498,
+    "lookahead_m": 86.74703110873502,
+    "freeze_yaw_dist": 38.87113808735111
   },
   "speed_target": 90.0,
   "pos_tol": 30.0,
-  "n_global": 180,
-  "keep_top": 12,
-  "n_restarts": 7,
-  "local_iters": 80,
+  "n_global": 360,
+  "keep_top": 19,
+  "n_restarts": 10,
+  "local_iters": 128,
   "dt_coarse": 0.2,
-  "T_coarse": 70.0,
+  "T_coarse": 700.0,
   "dt_fine": 0.1,
-  "T_fine": 95.0,
+  "T_fine": 950.0,
   "suite_size": 5,
   "start_cases": [
     [
@@ -52,5 +52,6 @@
       90.0
     ]
   ],
-  "seed": 0
+  "seed": 0,
+  "tight": true
 }

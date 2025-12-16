@@ -2,16 +2,26 @@ import math
 import numpy as np
 import rasterio
 from rasterio.errors import RasterioIOError
-from rasterio.transform import from_origin
+from rasterio.transform import from_origin, Affine
 import threading
 from pathlib import Path
 from typing import Optional, List, Tuple
+from multiprocessing import shared_memory
 
 from sim.config import WORLD_HALF, clamp, MAP_DIR
 
 
 class DEM:
-    def __init__(self, path):
+    def __init__(self, path=None, *, shared: dict | None = None):
+        """
+        If 'shared' metadata is provided, attach to an existing shared-memory DEM
+        buffer instead of loading tiles from disk. This avoids per-worker raster
+        loads when multiple processes run in parallel.
+        """
+        if shared is not None:
+            self._init_from_shared(shared)
+            return
+
         path = Path(path)
         root_dir = path.parent if path.is_file() else Path(path)
         tif_paths = sorted(root_dir.glob("*.tif"))
@@ -73,6 +83,32 @@ class DEM:
                 print(
                     f"[DEM] WARNING: Failed to read any DEM tile (tried {len(self.tiles)} file(s); first failure: {self.tiles[init_idx][0].name}). Using synthetic flat DEM."
                 )
+
+    def _init_from_shared(self, shared: dict):
+        name = shared.get("name")
+        shape = tuple(shared.get("shape", ()))
+        dtype = np.dtype(shared.get("dtype", "float32"))
+        self.shared_mem = shared_memory.SharedMemory(name=name)
+        self.elevation = np.ndarray(shape=shape, dtype=dtype, buffer=self.shared_mem.buf)
+        self._lock = threading.Lock()
+        self.tiles = []
+        self.bad_tiles = set()
+        self.synthetic = shared.get("synthetic", False)
+        self.ref_lon = shared.get("ref_lon", 0.0)
+        self.ref_lat = shared.get("ref_lat", 0.0)
+        self.m_per_deg_lon = shared.get("scale_x", 111320.0)
+        self.m_per_deg_lat = shared.get("scale_y", 111320.0)
+        self.scale_x = self.m_per_deg_lon
+        self.scale_y = self.m_per_deg_lat
+        self._bounds = tuple(shared.get("bounds", (0.0, 0.0, 0.0, 0.0)))
+        self.xmin, self.ymin, self.xmax, self.ymax = self._bounds
+        self.env_bounds = tuple(shared.get("env_bounds", (0.0, 0.0, 0.0, 0.0)))
+        self.world_env_bounds = tuple(shared.get("world_env_bounds", self.env_bounds))
+        self.active_idx = shared.get("active_idx", 0)
+        transform_params = shared.get("transform")
+        self.transform = Affine(*transform_params) if transform_params else None
+        self.min_elev = float(shared.get("min_elev", np.nanmin(self.elevation)))
+        self.max_elev = float(shared.get("max_elev", np.nanmax(self.elevation)))
 
     def _set_active_tile(self, idx: int) -> bool:
         ds = self.tiles[idx][0]

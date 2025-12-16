@@ -45,6 +45,7 @@ def run_uav_process(
     cmd_queue: Queue,
     state_queue: Queue,
     stop_event: Event,
+    dem_shared: dict | None = None,
 ):
     """
     Multiprocessing worker: integrate a single airframe and stream back state tuples.
@@ -53,7 +54,7 @@ def run_uav_process(
       {"type": "reset", "state": tuple}
       {"type": "time_scale", "value": float}
     """
-    dem = DEM(dem_file)
+    dem = DEM(shared=dem_shared) if dem_shared else DEM(dem_file)
     airframe = _make_airframe(uav_type, params)
     _apply_state(airframe, initial_state)
 
@@ -64,7 +65,7 @@ def run_uav_process(
     prev = last_send
     sim_since_send = 0.0
     sim_step = 0.01  # fixed integration step (sim seconds)
-    send_sim_interval = 0.01  # target spacing in simulation seconds
+    send_sim_interval = 0.05  # target spacing in simulation seconds (20 Hz)
 
     while not stop_event.is_set():
         now = time.perf_counter()
@@ -129,25 +130,32 @@ def run_uav_process(
                 step_budget -= step_dt
 
         if sim_since_send >= send_sim_interval:
-            state_queue.put(
-                {
-                    "idx": idx,
-                    "state": (
-                        airframe.s.x,
-                        airframe.s.y,
-                        airframe.s.z,
-                        airframe.s.roll,
-                        airframe.s.pitch,
-                        airframe.s.yaw,
-                        airframe.s.u,
-                        airframe.s.p,
-                        airframe.s.q,
-                        airframe.s.r,
-                    ),
-                    "crippled": crippled,
-                    "crashed": crashed,
-                }
-            )
+            msg = {
+                "idx": idx,
+                "state": (
+                    airframe.s.x,
+                    airframe.s.y,
+                    airframe.s.z,
+                    airframe.s.roll,
+                    airframe.s.pitch,
+                    airframe.s.yaw,
+                    airframe.s.u,
+                    airframe.s.p,
+                    airframe.s.q,
+                    airframe.s.r,
+                ),
+                "crippled": crippled,
+                "crashed": crashed,
+            }
+            try:
+                state_queue.put_nowait(msg)
+            except queue.Full:
+                # Drop oldest style: clear one slot then retry once.
+                try:
+                    state_queue.get_nowait()
+                    state_queue.put_nowait(msg)
+                except Exception:
+                    pass
             last_send = now
             sim_since_send = 0.0
 

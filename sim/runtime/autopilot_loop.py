@@ -286,15 +286,10 @@ def update_autopilots(app: "SimulationApp", dt_sim: float, wall_dt: float) -> No
                 ap.update(ctrl_step, dem=app.dem, wall_dt=wall_slice)
                 update_filming_target(app, idx, ap.current_target(), ctrl_step)
         else:
-            # Fallback: advance over the reported dt_sim in fixed steps.
-            remaining = max(0.0, float(dt_sim))
-            total_sim = remaining if remaining > 0 else ctrl_step
-            while remaining > 0.0:
-                step = ctrl_step if remaining >= ctrl_step else remaining
-                wall_slice = wall_dt * (step / total_sim) if total_sim > 0 else 0.0
-                ap.update(step, dem=app.dem, wall_dt=wall_slice)
-                update_filming_target(app, idx, ap.current_target(), step)
-                remaining -= step
+            # No buffered states (e.g., worker lag) -> single control update for the elapsed sim time.
+            step = float(dt_sim) if dt_sim and dt_sim > 0 else ctrl_step
+            ap.update(step, dem=app.dem, wall_dt=wall_dt)
+            update_filming_target(app, idx, ap.current_target(), step)
 
         # Track current filming property for this UAV (current target of autopilot).
         tgt = ap.current_target()

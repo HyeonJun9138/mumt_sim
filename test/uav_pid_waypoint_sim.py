@@ -315,19 +315,33 @@ def make_tuning_suite(base_wps: List[Tuple[float, float, float]]) -> List[List[T
     return suite
 
 
-def _default_param_specs() -> List[ParamSpec]:
+def _default_param_specs(*, tight: bool = False) -> List[ParamSpec]:
+    """Parameter bounds; tight=True widens gains and allows shorter lookahead for large dt."""
+    yaw_hi = 3.0 if tight else 2.5
+    yaw_i_hi = 0.28 if tight else 0.2
+    pitch_rate_hi = 4.2 if tight else 3.2
+    pitch_damp_hi = 3.6 if tight else 2.5
+    alt_pitch_hi = 0.12 if tight else 0.09
+    alt_i_hi = 0.28 if tight else 0.2
+    throttle_hi = 0.45 if tight else 0.35
+    throttle_alt_hi = 5e-3 if tight else 2.5e-3
+    throttle_i_hi = 0.32 if tight else 0.2
+    lookahead_lo = 0.0 if tight else 10.0
+    lookahead_hi = 140.0 if tight else 220.0
+    freeze_dist_hi = 110.0 if tight else 160.0
+
     return [
-        ParamSpec("yaw", 0.2, 2.5, "linear"),
-        ParamSpec("yaw_i", 0.0, 0.2, "linear"),
-        ParamSpec("pitch_rate", 0.4, 3.2, "linear"),
-        ParamSpec("pitch_damp", 0.2, 2.5, "linear"),
-        ParamSpec("alt_pitch", 0.005, 0.09, "linear"),
-        ParamSpec("alt_i", 0.0, 0.2, "linear"),
-        ParamSpec("throttle", 0.02, 0.35, "linear"),
-        ParamSpec("throttle_alt", 1e-4, 2.5e-3, "log"),
-        ParamSpec("throttle_i", 0.0, 0.2, "linear"),
-        ParamSpec("lookahead_m", 10.0, 220.0, "linear"),
-        ParamSpec("freeze_yaw_dist", 0.0, 160.0, "linear"),
+        ParamSpec("yaw", 0.2, yaw_hi, "linear"),
+        ParamSpec("yaw_i", 0.0, yaw_i_hi, "linear"),
+        ParamSpec("pitch_rate", 0.4, pitch_rate_hi, "linear"),
+        ParamSpec("pitch_damp", 0.2, pitch_damp_hi, "linear"),
+        ParamSpec("alt_pitch", 0.005, alt_pitch_hi, "linear"),
+        ParamSpec("alt_i", 0.0, alt_i_hi, "linear"),
+        ParamSpec("throttle", 0.02, throttle_hi, "linear"),
+        ParamSpec("throttle_alt", 1e-4, throttle_alt_hi, "log"),
+        ParamSpec("throttle_i", 0.0, throttle_i_hi, "linear"),
+        ParamSpec("lookahead_m", lookahead_lo, lookahead_hi, "linear"),
+        ParamSpec("freeze_yaw_dist", 0.0, freeze_dist_hi, "linear"),
     ]
 
 
@@ -389,7 +403,15 @@ def _lhs_candidates(specs: List[ParamSpec], n: int, rng: np.random.Generator) ->
     return cands
 
 
-def _score_run(errs_xy: np.ndarray, errs_alt: np.ndarray, info: dict, dt: float, speed_target: float) -> float:
+def _score_run(
+    errs_xy: np.ndarray,
+    errs_alt: np.ndarray,
+    info: dict,
+    dt: float,
+    speed_target: float,
+    *,
+    tight: bool = False,
+) -> float:
     if info.get("aborted", False) or errs_xy.size == 0:
         return 3e6
 
@@ -414,20 +436,45 @@ def _score_run(errs_xy: np.ndarray, errs_alt: np.ndarray, info: dict, dt: float,
     if np.isfinite(min_u):
         speed_pen = max(0.0, (speed_target * 0.35 - min_u)) * 40.0
 
+    if tight:
+        w_iae_xy = 1.4
+        w_p95_xy = 0.9
+        w_max_xy = 0.45
+        w_iae_alt = 1.8
+        w_p95_alt = 1.0
+        w_max_alt = 0.55
+        w_sat = 320.0
+        w_eff = 8.0
+    else:
+        w_iae_xy = 1.0
+        w_p95_xy = 0.45
+        w_max_xy = 0.15
+        w_iae_alt = 1.25
+        w_p95_alt = 0.55
+        w_max_alt = 0.15
+        w_sat = 220.0
+        w_eff = 6.0
+
+    final_pen = 0.0
+    if tight and errs_xy.size > 0:
+        final_pen = float(errs_xy[-1] * 12.0 + errs_alt[-1] * 14.0)
+
     base = (
-        1.0 * iae_xy
-        + 0.45 * p95_xy
-        + 0.15 * max_xy
-        + 1.25 * iae_alt
-        + 0.55 * p95_alt
-        + 0.15 * max_alt
-        + 220.0 * sat_ratio
-        + 6.0 * eff
+        w_iae_xy * iae_xy
+        + w_p95_xy * p95_xy
+        + w_max_xy * max_xy
+        + w_iae_alt * iae_alt
+        + w_p95_alt * p95_alt
+        + w_max_alt * max_alt
+        + w_sat * sat_ratio
+        + w_eff * eff
         + speed_pen
+        + final_pen
     )
 
     if not finished:
-        base += 1e6 + 5.0 * max_xy + 5.0 * max_alt
+        extra = 1.4e6 if tight else 1e6
+        base += extra + 8.0 * max_xy + 8.0 * max_alt
 
     return float(base)
 
@@ -441,12 +488,13 @@ def _evaluate_params(
     speed_target: float,
     pos_tol: float,
     start_cases: List[tuple[Tuple[float, float], float, float]],
+    tight: bool = False,
     cache: dict[tuple, float] | None = None,
 ) -> float:
     key = None
     if cache is not None:
         key = tuple((k, round(float(v), 6)) for k, v in sorted(params.items()))
-        key = key + (("dt", round(dt, 4)), ("T", round(total_time, 2)), ("V", round(speed_target, 2)))
+        key = key + (("dt", round(dt, 4)), ("T", round(total_time, 2)), ("V", round(speed_target, 2)), ("tight", tight))
         if key in cache:
             return cache[key]
 
@@ -469,7 +517,7 @@ def _evaluate_params(
                 start_speed=u0,
                 return_info=True,
             )
-            total += _score_run(exy, ealt, info, dt=dt, speed_target=speed_target)
+            total += _score_run(exy, ealt, info, dt=dt, speed_target=speed_target, tight=tight)
             n += 1
 
     score = total / max(1, n)
@@ -533,12 +581,13 @@ def tune_pid_gains(
     T_coarse: float = 70.0,
     dt_fine: float = 0.01,
     T_fine: float = 95.0,
+    tight: bool = False,
     # 체크포인트 저장
     save_path: str | None = None,
     report_path: str | None = None,
 ) -> tuple[PIDGains, dict]:
     rng = np.random.default_rng(seed)
-    specs = _default_param_specs()
+    specs = _default_param_specs(tight=tight)
     waypoint_sets = make_tuning_suite(base_waypoints)
 
     start_cases = [
@@ -556,6 +605,7 @@ def tune_pid_gains(
             dt=dt_coarse, total_time=T_coarse,
             speed_target=speed_target, pos_tol=pos_tol,
             start_cases=start_cases,
+            tight=tight,
             cache=cache_coarse,
         )
 
@@ -565,6 +615,7 @@ def tune_pid_gains(
             dt=dt_fine, total_time=T_fine,
             speed_target=speed_target, pos_tol=pos_tol,
             start_cases=start_cases,
+            tight=tight,
             cache=cache_fine,
         )
 
@@ -617,6 +668,7 @@ def tune_pid_gains(
                     "suite_size": int(len(waypoint_sets)),
                     "start_cases": start_cases,
                     "seed": int(seed),
+                    "tight": bool(tight),
                 }
                 save_report(report_path, rep)
 
@@ -703,6 +755,7 @@ def tune_pid_gains(
         "suite_size": int(len(waypoint_sets)),
         "start_cases": start_cases,
         "seed": int(seed),
+        "tight": bool(tight),
     }
     if report_path is not None:
         save_report(report_path, report)
@@ -728,19 +781,49 @@ def sweep_time_scales(
     save_dir: str | Path = "test/uav_pid_db",
     db_name: str = "uav_pid_db.json",
     aggregate_path: str | Path | None = None,
+    tight: bool = False,
 ):
     """
     Run tuning for multiple time_scale values (dt scaled accordingly) and save a DB JSON with per-scale gains.
     Also writes an aggregated DB if aggregate_path is provided.
+    Note: scales >= 5.0 auto-enable tight scoring/bounds (unless already True).
     """
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     db_path = save_dir / db_name
 
+    def _load_db_records(path: Path) -> list[dict]:
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("records"), list):
+                return list(data["records"])
+        except Exception:
+            pass
+        return []
+
+    def _merge_records(path: Path, updates: list[dict]) -> list[dict]:
+        existing = {float(r.get("time_scale", i)): r for i, r in enumerate(_load_db_records(path))}
+        for r in updates:
+            ts = float(r.get("time_scale", len(existing)))
+            existing[ts] = r
+        merged = sorted(existing.values(), key=lambda r: float(r.get("time_scale", 0.0)))
+        _save_json_atomic(path, {"records": merged})
+        return merged
+
     prefix = Path(db_name).stem.replace("_db", "")
     records = []
     for ts in time_scales:
         ts = float(ts)
+        ts_tight = bool(tight or ts >= 5.0)
+        ts_is_large = ts >= 5.0
+        n_global_ts = int(n_global * (2.0 if ts_is_large else 1.0))
+        keep_top_ts = max(keep_top, int(keep_top * (1.6 if ts_is_large else 1.0)))
+        n_restarts_ts = max(n_restarts, int(n_restarts * (1.5 if ts_is_large else 1.0)))
+        local_iters_ts = int(local_iters * (1.6 if ts_is_large else 1.0))
+        T_coarse_ts = T_coarse * (ts if ts_is_large else 1.0)
+        T_fine_ts = T_fine * (ts if ts_is_large else 1.0)
         rep_path = save_dir / f"{prefix}_scale_{ts:.2f}.report.json"
         gains_path = save_dir / f"{prefix}_scale_{ts:.2f}.json"
         print(f"[sweep] time_scale={ts:.2f} dt_coarse={dt_coarse*ts:.4f} dt_fine={dt_fine*ts:.4f}")
@@ -748,38 +831,46 @@ def sweep_time_scales(
             base_waypoints,
             speed_target=speed_target,
             pos_tol=pos_tol,
-            n_global=n_global,
-            keep_top=keep_top,
-            n_restarts=n_restarts,
-            local_iters=local_iters,
+            n_global=n_global_ts,
+            keep_top=keep_top_ts,
+            n_restarts=n_restarts_ts,
+            local_iters=local_iters_ts,
             seed=seed,
             dt_coarse=dt_coarse * ts,
-            T_coarse=T_coarse,
+            T_coarse=T_coarse_ts,
             dt_fine=dt_fine * ts,
-            T_fine=T_fine,
+            T_fine=T_fine_ts,
             save_path=gains_path,
             report_path=rep_path,
+            tight=ts_tight,
         )
         records.append(
             {
                 "time_scale": ts,
                 "dt_coarse": dt_coarse * ts,
                 "dt_fine": dt_fine * ts,
+                "T_coarse": T_coarse_ts,
+                "T_fine": T_fine_ts,
                 "best_score": float(rep_ts["best_score"]),
                 "best_stage": rep_ts.get("best_stage"),
                 "gains": gains_ts.__dict__,
                 "report_path": str(rep_path),
                 "gains_path": str(gains_path),
+                "tight": bool(ts_tight),
+                "n_global": n_global_ts,
+                "keep_top": keep_top_ts,
+                "n_restarts": n_restarts_ts,
+                "local_iters": local_iters_ts,
             }
         )
-    _save_json_atomic(db_path, {"records": records})
+    merged_db = _merge_records(db_path, records)
     if aggregate_path is not None:
         agg_path = Path(aggregate_path)
         agg_path.parent.mkdir(parents=True, exist_ok=True)
-        _save_json_atomic(agg_path, {"records": records})
-        print(f"[sweep] saved aggregate DB to {agg_path}")
-    print(f"[sweep] saved DB with {len(records)} entries to {db_path}")
-    return db_path, records
+        merged_agg = _merge_records(agg_path, records)
+        print(f"[sweep] saved aggregate DB to {agg_path} ({len(merged_agg)} total)")
+    print(f"[sweep] saved DB with {len(merged_db)} entries to {db_path}")
+    return db_path, merged_db
 
 
 # -----------------------------
@@ -967,6 +1058,11 @@ if __name__ == "__main__":
         default="sim/runtime/controllers/uav_pid_db.json",
         help="path to save aggregated DB json for simulator (default: sim/runtime/controllers/uav_pid_db.json)",
     )
+    parser.add_argument(
+        "--tight",
+        action="store_true",
+        help="tighter scoring/wider gains for large dt (e.g., time_scale 10 or 20)",
+    )
     args = parser.parse_args()
 
     wp_demo = [
@@ -1027,6 +1123,7 @@ if __name__ == "__main__":
                 save_dir=Path(args.sweep_dir),
                 db_name="uav_pid_db.json",
                 aggregate_path=args.aggregate,
+                tight=args.tight,
             )
         exit(0)
 
@@ -1047,6 +1144,7 @@ if __name__ == "__main__":
             T_fine=95.0,
             save_path=save_path,
             report_path=report_path,
+            tight=args.tight,
         )
         gains = tuned
         print(f"[tune] final best gains: {gains} (score {rep['best_score']:.2f})")
